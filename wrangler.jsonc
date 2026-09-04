@@ -1,0 +1,39 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ademe-app",
+  "main": "server/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // The React build. Requests that match a file are served from here without
+  // touching the Worker, and those are free and unlimited.
+  "assets": { "directory": "./dist", "binding": "ASSETS" },
+
+  // App plane only -- accounts and saved state. The 15.5M public certificates
+  // are Parquet on R2 and are never read through this binding. See ADR-0001.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "ademe-app",
+      "database_id": "PLACEHOLDER_SET_BY_WRANGLER_D1_CREATE",
+      "migrations_dir": "db/migrations"
+    }
+  ],
+
+  "observability": { "enabled": true },
+
+  "env": {
+    // `npm run preview` uploads a version against this environment so a preview
+    // can never write to real user data. See CLAUDE.md section 5.
+    "preview": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "ademe-app-preview",
+          "database_id": "PLACEHOLDER_SET_BY_WRANGLER_D1_CREATE",
+          "migrations_dir": "db/migrations"
+        }
+      ]
+    }
+  }
+}

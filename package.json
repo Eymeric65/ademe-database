@@ -1,0 +1,39 @@
+{
+  "name": "ademe-database",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:worker": "wrangler dev",
+    "build": "tsc --noEmit && vite build",
+    "check": "tsc --noEmit && vitest run && npm run db:check",
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "db:generate": "drizzle-kit generate && tsx scripts/bundle-migrations.ts",
+    "db:bundle": "tsx scripts/bundle-migrations.ts",
+    "db:check": "npm run db:generate && git diff --exit-code db/",
+    "db:migrate:local": "wrangler d1 migrations apply ademe-app --local",
+    "preview": "tsx scripts/preview.ts"
+  },
+  "dependencies": {
+    "better-auth": "^1.2",
+    "drizzle-orm": "^0.45.2",
+    "react": "^19.1",
+    "react-dom": "^19.1"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8",
+    "@cloudflare/workers-types": "^5.20260903",
+    "@playwright/test": "^1.55",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.1",
+    "@types/react-dom": "^19.1",
+    "@vitejs/plugin-react": "^5.0",
+    "drizzle-kit": "^0.31",
+    "tsx": "^4.20",
+    "typescript": "^5.9",
+    "vite": "^7.1",
+    "vitest": "^3.2",
+    "wrangler": "^4.40"
+  }
+}
