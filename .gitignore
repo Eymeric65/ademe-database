@@ -1,0 +1,17 @@
+# The SQLite build is data, never source. Built by `python -m ademe.ingest`.
+# No trailing slash: a symlinked database/ must be ignored too.
+database
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+node_modules
+dist
+.wrangler
+test-results
+playwright-report
+
+__pycache__
+.pytest_cache
+.venv
+.claude

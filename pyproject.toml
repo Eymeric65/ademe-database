@@ -1,0 +1,24 @@
+[project]
+name = "ademe-database"
+version = "0.1.0"
+description = "Lossless, aggressively normalised local SQLite build of the ADEME DPE open data"
+requires-python = ">=3.13"
+# stdlib only for the ETL itself: sqlite3, csv, urllib, json.
+# The point of this repo is a measurement, and every dependency is a variable
+# in that measurement. httpx is here only because retry/timeout handling
+# against a 17-hour download is worth not hand-rolling.
+dependencies = ["httpx>=0.28"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-xdist>=3"]
+
+[tool.pytest.ini_options]
+# -n auto matches the other repos. maxprocesses is a ceiling against the
+# API's rate limiting, not a tuning dial: the round-trip test hits the
+# live endpoint and parallel workers share one IP.
+addopts = "-q --strict-markers -n auto --maxprocesses=4"
+testpaths = ["tests"]
+# The ETL is a plain package run with `python -m ademe.*`, not an installed
+# distribution -- there is nothing to build or ship.
+pythonpath = ["."]
+markers = ["live: hits the live ADEME API"]
