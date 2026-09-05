@@ -37,3 +37,25 @@ jobs:
           enable-cache: true
       - run: uv sync
       - run: uv run pytest -m "not live"
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Runs against `wrangler dev` -- built assets and the API on one origin,
+      # the same shape as production. See playwright.config.ts.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
