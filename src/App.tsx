@@ -1,5 +1,46 @@
+import { useState } from 'react'
 import { useSession } from './auth'
 import { useRoute } from './routes'
+import { search, type Hit } from './data/duck'
+import { Results } from './search/Results'
+import { SearchForm } from './search/SearchForm'
+import type { QuerySpec } from './search/spec'
+
+function Search() {
+  const [hits, setHits] = useState<Hit[]>([])
+  const [ran, setRan] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function run(spec: QuerySpec) {
+    setBusy(true)
+    setError(null)
+    try {
+      setHits(await search(spec))
+      setRan(true)
+    } catch (err) {
+      // The data plane is a set of files on another origin. When it is
+      // unreachable the page must say so rather than show an empty result,
+      // which reads as "no such property".
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section>
+      <h1>Retrouvez un logement à partir de son DPE</h1>
+      <p className="lede">
+        Une annonce publie la classe énergie, la surface et la commune, mais pas
+        l’adresse. Le diagnostic, lui, est public. Entrez ce que vous savez.
+      </p>
+      <SearchForm onSearch={(spec) => void run(spec)} busy={busy} />
+      {error ? <p className="error">Les données sont indisponibles : {error}</p> : null}
+      <Results hits={hits} ran={ran && !error} />
+    </section>
+  )
+}
 
 /**
  * The energy label is this product's whole subject, so it is also its mark.
@@ -63,13 +104,7 @@ export default function App() {
             <p className="lede">Les certificats que vous gardez apparaîtront ici.</p>
           </section>
         ) : (
-          <section>
-            <h1>Retrouvez un logement à partir de son DPE</h1>
-            <p className="lede">
-              Une annonce publie la classe énergie, la surface et la commune, mais pas
-              l’adresse. Le diagnostic, lui, est public. Entrez ce que vous savez.
-            </p>
-          </section>
+          <Search />
         )}
       </main>
     </>
