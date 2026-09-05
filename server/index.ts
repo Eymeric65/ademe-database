@@ -86,6 +86,12 @@ export default {
     // binding without touching a database.
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
 
+    // Before dispatch, not inside a handler: the Worker has no deploy-time
+    // hook that can reach D1, so the first request an isolate serves is what
+    // brings the schema up to date. Doing it in one handler only would leave
+    // every OTHER route to fail with "no such table" on a fresh database.
+    await ensureMigrated(env)
+
     let matched: { route: Route; params: Record<string, string> } | null = null
     for (const route of ROUTES) {
       const params = match(route.path, url.pathname)
