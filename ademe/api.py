@@ -63,10 +63,18 @@ def _get(client: httpx.Client, url: str, params: dict | None = None) -> httpx.Re
     raise ApiError(f"{url}: giving up after {RETRIES} attempts ({last})")
 
 
-def total(client: httpx.Client, *, departement: str | None = None) -> int:
-    params = {"size": 0}
+def _departement_qs(code: str) -> str:
+    return f'code_departement_ban:"{code}"'
+
+
+def total(
+    client: httpx.Client, *, departement: str | None = None, qs: str | None = None
+) -> int:
+    params: dict = {"size": 0}
     if departement:
-        params["qs"] = f'code_departement_ban:"{departement}"'
+        params["qs"] = _departement_qs(departement)
+    elif qs:
+        params["qs"] = qs
     return _get(client, f"{API}/lines", params).json()["total"]
 
 
@@ -100,17 +108,32 @@ def iter_pages(
     client: httpx.Client,
     *,
     departement: str | None = None,
+    qs: str | None = None,
+    select: list[str] | None = None,
     start_url: str | None = None,
     page_size: int = PAGE_SIZE,
 ) -> Iterator[Page]:
-    """Yield pages of rows. Resume by passing a previously stored `next_url`."""
+    """Yield pages of rows. Resume by passing a previously stored `next_url`.
+
+    `departement=` is sugar for the equivalent `qs`; the weekly delta needs an
+    arbitrary filter (a range over the modification date) rather than one more
+    named argument per query shape.
+
+    `select=` narrows the columns. Reconciliation pulls `numero_dpe` alone --
+    about 15 B a row against ~2 kB for the whole record, which is the
+    difference between eight minutes and a day.
+    """
     if start_url:
         url, params = start_url, None
     else:
         url = f"{API}/lines"
         params = {"size": page_size, "format": "csv", "sort": "_i"}
         if departement:
-            params["qs"] = f'code_departement_ban:"{departement}"'
+            params["qs"] = _departement_qs(departement)
+        elif qs:
+            params["qs"] = qs
+        if select:
+            params["select"] = ",".join(select)
 
     while True:
         p = page(client, url, params)
