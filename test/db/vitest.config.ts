@@ -20,6 +20,15 @@ export default defineWorkersConfig({
         // run against a fresh one in every file that asks for it.
         isolatedStorage: true,
         wrangler: { configPath: '../../wrangler.jsonc' },
+        miniflare: {
+          bindings: {
+            // Dev and preview set this; production never does. The OFF case is
+            // tested in auth.test.ts by building authFor() with it absent.
+            AUTH_TEST_CREDENTIALS: '1',
+            BETTER_AUTH_SECRET: 'test-secret-not-used-anywhere-real',
+            BETTER_AUTH_URL: 'http://x',
+          },
+        },
       },
     },
   },

@@ -15,7 +15,7 @@
  * See CLAUDE.md section 9 and ADR-0003.
  */
 
-import { callerFrom, ensureMigrated, type Caller } from './db'
+import { authFor, callerFrom, ensureMigrated, type Caller } from './db'
 
 type Scope = 'public' | 'self' | 'owner'
 
@@ -45,6 +45,28 @@ export const ROUTES: Route[] = [
     scope: 'public',
     handle: async ({ env }) => json({ ok: true, migrations: (await ensureMigrated(env)).length }),
   },
+  // Sign-in has to be reachable without being signed in.
+  {
+    method: 'ANY',
+    path: '/api/auth/*',
+    scope: 'public',
+    handle: ({ request, env }) => authFor(env, new URL(request.url).origin).handler(request),
+  },
+  {
+    method: 'GET',
+    path: '/api/me',
+    scope: 'self',
+    handle: async ({ request, env, caller }) => {
+      const session = await authFor(env, new URL(request.url).origin).api.getSession({
+        headers: request.headers,
+      })
+      // The gate already refused a caller with no subject, so a null session
+      // here would mean the two disagreed. Fail closed rather than guess.
+      if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
+      const { id, name, email } = session.user
+      return json({ id, name, email })
+    },
+  },
 ]
 
 function json(body: unknown, status = 200): Response {
@@ -56,6 +78,13 @@ function json(body: unknown, status = 200): Response {
 
 /** Matches `/api/buildings/:id` against a concrete path, returning its params. */
 function match(pattern: string, path: string): Record<string, string> | null {
+  // A trailing /* matches the whole subtree. Better Auth owns many paths under
+  // /api/auth and routes them itself; enumerating them here would mean this
+  // file drifting out of date with the library on every upgrade.
+  if (pattern.endsWith('/*')) {
+    const prefix = pattern.slice(0, -1)
+    return path.startsWith(prefix) ? {} : null
+  }
   const p = pattern.split('/')
   const s = path.split('/')
   if (p.length !== s.length) return null
@@ -70,12 +99,21 @@ function match(pattern: string, path: string): Record<string, string> | null {
 }
 
 /**
- * Resolve the caller from the request. PR3 replaces this with a real session
- * lookup; until then nobody is ever authenticated, which is the safe direction
- * for a stub to be wrong in.
+ * Resolve the caller from the request's session cookie.
+ *
+ * A failure here resolves to `callerFrom(null)`, which is an empty subject and
+ * therefore matches no row -- the gate then answers 401. An auth outage cannot
+ * turn into an authorization bypass.
  */
-async function callerFor(_request: Request, _env: Env): Promise<Caller> {
-  return callerFrom(null)
+async function callerFor(request: Request, env: Env): Promise<Caller> {
+  try {
+    const session = await authFor(env, new URL(request.url).origin).api.getSession({
+      headers: request.headers,
+    })
+    return callerFrom(session?.user.id)
+  } catch {
+    return callerFrom(null)
+  }
 }
 
 export default {
@@ -95,7 +133,7 @@ export default {
     let matched: { route: Route; params: Record<string, string> } | null = null
     for (const route of ROUTES) {
       const params = match(route.path, url.pathname)
-      if (params && route.method === request.method) {
+      if (params && (route.method === request.method || route.method === 'ANY')) {
         matched = { route, params }
         break
       }
