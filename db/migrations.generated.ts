@@ -23,5 +23,11 @@ export const MIGRATIONS: readonly Migration[] = [
       "CREATE TABLE `verification` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`identifier` text NOT NULL,\n\t`value` text NOT NULL,\n\t`expires_at` integer NOT NULL,\n\t`created_at` integer DEFAULT (unixepoch()) NOT NULL,\n\t`updated_at` integer DEFAULT (unixepoch()) NOT NULL\n);",
       "CREATE INDEX `verification_identifier_idx` ON `verification` (`identifier`);"
     ]
+  },
+  {
+    "name": "0001_account_issuer",
+    "statements": [
+      "ALTER TABLE `account` ADD `issuer` text;"
+    ]
   }
 ] as const

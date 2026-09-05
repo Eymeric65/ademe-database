@@ -101,17 +101,24 @@ def reference_ddl(cols: dict[str, spec.Column]) -> list[str]:
     ]
     adresse_cols = [_col_sql(cols[src], dst)[1] for src, dst in ADRESSE_COLUMNS.items()]
     return [
+        # TRAP: the primary key is a surrogate, and the dedup key is the WHOLE
+        # tuple -- not code_insee. ADEME does not normalise `nom_commune_ban`,
+        # so certificates for one commune carry both `PAMIERS` and `Pamiers`.
+        # Keying on the INSEE code let whichever certificate arrived first
+        # impose its spelling on every later one, which is lossy. Same shape,
+        # and same reason, as `adresse`. See ADR-0010.
         f"""CREATE TABLE IF NOT EXISTS commune (
-    code_insee TEXT PRIMARY KEY,
+    commune_id INTEGER PRIMARY KEY,
+    code_insee TEXT NOT NULL,
     {",\n    ".join(commune_cols)}
-) WITHOUT ROWID""",
+)""",
         # ~5.06M rows against 15.5M certificates: 3.07 DPEs share an address.
         # lat/lon live here too -- they are a property of the address, so
         # storing them per certificate would triple them for nothing.
         f"""CREATE TABLE IF NOT EXISTS adresse (
     adresse_id INTEGER PRIMARY KEY,
     {",\n    ".join(adresse_cols)},
-    code_insee TEXT REFERENCES commune(code_insee)
+    commune_id INTEGER REFERENCES commune(commune_id)
 )""",
     ]
 
@@ -176,6 +183,17 @@ def all_ddl(cols: dict[str, spec.Column] | None = None) -> list[str]:
     )
 
 
+def commune_key_columns(cols: dict[str, spec.Column] | None = None) -> list[str]:
+    """The columns a commune is deduplicated on: all of them."""
+    cols = cols if cols is not None else spec.load()
+    out = ["code_insee"]
+    for src, dst in COMMUNE_COLUMNS.items():
+        if dst == "code_insee":
+            continue
+        out.append(dest_name(cols[src], dst))
+    return out
+
+
 def indexes_ddl() -> list[str]:
     """Built by `finalise`, after the load: creating them up front would make
     every insert maintain a B-tree it does not need yet."""
@@ -183,7 +201,12 @@ def indexes_ddl() -> list[str]:
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe(numero_dpe)",
         "CREATE INDEX IF NOT EXISTS ix_dpe_adresse ON dpe(adresse_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_adresse_ban ON adresse(identifiant_ban)",
-        "CREATE INDEX IF NOT EXISTS ix_adresse_commune ON adresse(code_insee)",
+        "CREATE INDEX IF NOT EXISTS ix_adresse_commune ON adresse(commune_id)",
+        # UNIQUE so `finalise` fails loudly if the loader ever wrote a true
+        # duplicate; the load itself dedups through the Loader's cache.
+        "CREATE UNIQUE INDEX IF NOT EXISTS ux_commune_tuple ON commune("
+        + ", ".join(commune_key_columns())
+        + ")",
         "CREATE INDEX IF NOT EXISTS ix_commune_dept ON commune(code_departement)",
     ]
 

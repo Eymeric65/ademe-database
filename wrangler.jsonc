@@ -15,22 +15,55 @@
     {
       "binding": "DB",
       "database_name": "ademe-app",
-      "database_id": "PLACEHOLDER_SET_BY_WRANGLER_D1_CREATE",
+      "database_id": "227e47fd-e464-41b0-82ce-9f3ee64d9916",
       "migrations_dir": "db/migrations"
     }
   ],
 
   "observability": { "enabled": true },
 
+  // The production hostname. Configured here so a `wrangler deploy` from main
+  // attaches it; `wrangler versions upload` does NOT apply triggers, so a
+  // preview cannot take the domain (CLAUDE.md section 1).
+  "routes": [
+    { "pattern": "recherche-maison.com", "custom_domain": true },
+    { "pattern": "www.recherche-maison.com", "custom_domain": true }
+  ],
+
+  "vars": {
+    // Better Auth builds its OAuth redirect from this, so it must be the host
+    // Google was told about. Previews leave it unset and fall back to the
+    // request's own origin -- see authFor() in server/db.ts.
+    "BETTER_AUTH_URL": "https://recherche-maison.com"
+  },
+
   "env": {
     // `npm run preview` uploads a version against this environment so a preview
     // can never write to real user data. See CLAUDE.md section 5.
     "preview": {
+      // TRAP: an environment INHERITS the top-level `routes`. Without this
+      // empty array, deploying the preview reassigns recherche-maison.com away
+      // from the production Worker -- wrangler warns, and the warning is easy
+      // to scroll past.
+      "routes": [],
+
+      "vars": {
+        // TRAP: AUTH_TEST_CREDENTIALS is set HERE and nowhere else. Production
+        // must never carry it -- it turns on a password sign-in surface that
+        // exists only so CI can be two users at once. See ADR-0008.
+        "AUTH_TEST_CREDENTIALS": "1",
+
+        // Deliberately empty, not absent: `vars` are not inherited, and an
+        // empty string makes authFor() fall back to the request's own origin.
+        // Every branch gets its own <alias>-ademe-app-preview host, so no
+        // static value could be right for all of them.
+        "BETTER_AUTH_URL": ""
+      },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "ademe-app-preview",
-          "database_id": "PLACEHOLDER_SET_BY_WRANGLER_D1_CREATE",
+          "database_id": "cfde5faa-4b2e-4707-918a-63d370238ee4",
           "migrations_dir": "db/migrations"
         }
       ]

@@ -92,10 +92,10 @@ class Reconstructor:
             # Queried separately, not joined: `code_insee` exists on both tables
             # and a `SELECT a.*, c.*` collapses the duplicate names, which
             # silently blanked every commune column.
-            if adresse.get("code_insee"):
+            if adresse.get("commune_id") is not None:
                 got = self.conn.execute(
-                    "SELECT * FROM commune WHERE code_insee = ?",
-                    (adresse["code_insee"],),
+                    "SELECT * FROM commune WHERE commune_id = ?",
+                    (adresse["commune_id"],),
                 ).fetchone()
                 commune = dict(got) if got else {}
         got = self.conn.execute(
