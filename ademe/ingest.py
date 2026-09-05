@@ -61,7 +61,7 @@ class Loader:
         self.cols = cols
         self.cov = check_coverage(list(cols))
         self.vocab: dict[str, dict[str, int]] = {}
-        self.commune: set[str] = set()
+        self.commune: dict[tuple, int] = {}
         self.adresse: dict[tuple, int] = {}
         self._load_vocab()
         self._load_communes()
@@ -73,8 +73,16 @@ class Loader:
             self.vocab[domain] = {r["code"]: r["id"] for r in rows}
 
     def _load_communes(self) -> None:
+        """Rebuild the dedup cache from what is already loaded.
+
+        Keyed on the whole tuple, so a resumed run recognises a commune it
+        already wrote instead of writing it again.
+        """
+        cols = ddl.commune_key_columns(self.cols)
+        quoted = ", ".join(f'"{c}"' for c in cols)
         self.commune = {
-            r[0] for r in self.conn.execute("SELECT code_insee FROM commune")
+            tuple(r[1:]): r[0]
+            for r in self.conn.execute(f"SELECT commune_id, {quoted} FROM commune")
         }
 
     def vocab_id(self, domain: str, code: str) -> int | None:
@@ -95,25 +103,39 @@ class Loader:
             table[code] = got
         return got
 
-    def commune_key(self, row: dict) -> str | None:
+    def commune_id(self, row: dict) -> int | None:
+        """Deduplicate on the WHOLE commune tuple, not on the INSEE code.
+
+        ADEME does not normalise `nom_commune_ban`: one commune arrives as both
+        `PAMIERS` and `Pamiers`, and 13 of departement 09's 326 INSEE codes
+        carry two spellings. Keying on the code alone let the first certificate
+        impose its spelling on every later one, which the Parquet round-trip
+        caught as source='PAMIERS' rebuilt='Pamiers'. Identical rows -- the
+        overwhelming majority -- still collapse. See ADR-0010, and
+        `adresse_id` below, which has the same shape for the same reason.
+        """
         insee = row.get("code_insee_ban") or ""
         if not insee:
             return None
-        if insee not in self.commune:
-            names, vals = [], []
-            for src, dst in COMMUNE_COLUMNS.items():
-                if dst == "code_insee":
-                    continue
-                names.append(ddl.dest_name(self.cols[src], dst))
-                vals.append(self.convert(src, row.get(src, ""))[0])
-            self.conn.execute(
-                f"INSERT INTO commune (code_insee, {', '.join(names)})"
-                f" VALUES ({', '.join('?' * (len(names) + 1))})"
-                " ON CONFLICT(code_insee) DO NOTHING",
-                (insee, *vals),
-            )
-            self.commune.add(insee)
-        return insee
+        names, vals = [], []
+        for src, dst in COMMUNE_COLUMNS.items():
+            if dst == "code_insee":
+                continue
+            names.append(ddl.dest_name(self.cols[src], dst))
+            vals.append(self.convert(src, row.get(src, ""))[0])
+
+        key = (insee, *vals)
+        if (got := self.commune.get(key)) is not None:
+            return got
+        cur = self.conn.execute(
+            f"INSERT INTO commune (code_insee, {', '.join(names)})"
+            f" VALUES ({', '.join('?' * (len(names) + 1))})"
+            " RETURNING commune_id",
+            key,
+        )
+        cid = cur.fetchone()[0]
+        self.commune[key] = cid
+        return cid
 
     def adresse_id(self, row: dict) -> int | None:
         """3.07 certificates share an address.
@@ -146,8 +168,8 @@ class Loader:
             else:
                 vals.append(raw)
 
-        insee = self.commune_key(row)
-        key = (*vals, insee)
+        cid = self.commune_id(row)
+        key = (*vals, cid)
         if (got := self.adresse.get(key)) is not None:
             return got
 
@@ -156,9 +178,9 @@ class Loader:
             for s, d in ADRESSE_COLUMNS.items()
         ]
         cur = self.conn.execute(
-            f"INSERT INTO adresse ({', '.join(names)}, code_insee)"
+            f"INSERT INTO adresse ({', '.join(names)}, commune_id)"
             f" VALUES ({', '.join('?' * len(names))},?) RETURNING adresse_id",
-            (*vals, insee),
+            (*vals, cid),
         )
         aid = cur.fetchone()[0]
         self.adresse[key] = aid
