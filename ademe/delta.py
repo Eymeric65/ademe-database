@@ -24,6 +24,7 @@ import argparse
 import json
 import shutil
 import tempfile
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -238,6 +239,145 @@ def write_manifest(base_manifest: dict, delta_manifest: dict, rows: dict[str, in
     manifest["partitions"] = partitions
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
     return manifest
+
+
+# --- reconciliation ---------------------------------------------------------
+
+
+class ReconcileError(RuntimeError):
+    """Upstream contradicted itself, or the partition still disagrees after a
+    repair. Either way the manifest is not swapped."""
+
+
+@dataclass
+class Divergence:
+    """What one partition holds against what ADEME holds."""
+
+    dept: str
+    published: int
+    upstream: int
+    gone: list[str] = field(default_factory=list)
+    appeared: list[str] = field(default_factory=list)
+
+    def clean(self) -> bool:
+        return not self.gone and not self.appeared
+
+
+def _published_ids(duck, root: Path | str, dept: str) -> list[str]:
+    path = _url(root, "dpe", f"dept={dept}", "part-0000.parquet")
+    return [
+        r[0]
+        for r in duck.execute(
+            f"SELECT numero_dpe FROM read_parquet('{path}')"
+        ).fetchall()
+    ]
+
+
+def reconcile(client, root: Path | str, *, quiet: bool = True) -> dict[str, Divergence]:
+    """Compare every partition against ADEME, by count first and ids only if needed.
+
+    The delta cannot see a deletion. `dpe03existant` is a Data Fair VIRTUAL
+    dataset over a private child, filtered `dpe_desactive = 0`, and that field
+    is not in the public schema -- a deactivated certificate simply leaves the
+    view, and `date_derniere_modification_dpe > mark` never returns it. An
+    upsert-only merge would keep it forever. See ADR-0007.
+
+    The count is checked first because the id pull is not free: measured at
+    16.0 B a row, the whole dataset is ~248 MB and about eight minutes at
+    ADEME's documented 500 kB/s. Spending that every week on partitions that
+    already agree would be the difference between a polite job and a rude one.
+    """
+    manifest = read_manifest(root)
+    duck = duckdb.connect()
+    duck.execute("INSTALL httpfs; LOAD httpfs")
+
+    report: dict[str, Divergence] = {}
+    for part in manifest["partitions"]:
+        dept = part["dept"]
+        codes = part.get("codes", [dept])
+        upstream = sum(api.total(client, departement=c) for c in codes)
+        div = Divergence(dept=dept, published=part["rows"], upstream=upstream)
+
+        if upstream != part["rows"]:
+            here = set(_published_ids(duck, root, dept))
+            there: set[str] = set()
+            for code in codes:
+                for page in api.iter_pages(
+                    client, departement=code, select=["numero_dpe"], page_size=PAGE_SIZE
+                ):
+                    there.update(r["numero_dpe"] for r in page.rows)
+
+            # TRAP: upstream has to agree with itself before we act on it.
+            # Deleting rows on the strength of a total that disagrees with the
+            # ids behind it is deleting on the strength of a number known wrong.
+            if len(there) != upstream:
+                raise ReconcileError(
+                    f"dept {dept}: total says {upstream} but the id pull returned"
+                    f" {len(there)}; refusing to reconcile against a source that"
+                    " contradicts itself"
+                )
+            div.gone = sorted(here - there)
+            div.appeared = sorted(there - here)
+
+        if not quiet:
+            state = "ok" if div.clean() else f"-{len(div.gone)} +{len(div.appeared)}"
+            print(f"  dept={dept}: published {div.published}, upstream {upstream} [{state}]")
+        report[dept] = div
+
+    duck.close()
+    return report
+
+
+def apply_deletions(root: Path | str, report: dict[str, Divergence], out: Path) -> list[str]:
+    """Rewrite every partition that lost rows, and carry the rest over.
+
+    Only deletions. Certificates that APPEARED upstream come back through the
+    ordinary delta path, which already knows how to normalise a full record --
+    reconciliation only ever sees an id.
+    """
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    manifest = read_manifest(root)
+    duck = duckdb.connect()
+    duck.execute("INSTALL httpfs; LOAD httpfs")
+
+    rewritten: list[str] = []
+    rows: dict[str, int] = {}
+    for part in manifest["partitions"]:
+        dept = part["dept"]
+        div = report.get(dept)
+        gone = div.gone if div else []
+
+        for kind, row_group, columns, order in (
+            ("dpe", DPE_ROW_GROUP, "*", "numero_dpe"),
+            ("search", SEARCH_ROW_GROUP, ", ".join(f'"{c}"' for c in SEARCH_COLUMNS),
+             ", ".join(f'"{c}"' for c in SEARCH_SORT)),
+        ):
+            src = _url(root, kind, f"dept={dept}", "part-0000.parquet")
+            dest = out / kind / f"dept={dept}" / "part-0000.parquet"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not gone:
+                _copy(src, dest)
+                continue
+            ids = ", ".join(f"'{n}'" for n in gone)
+            duck.execute(
+                f"COPY (SELECT {columns} FROM read_parquet('{src}')"
+                f" WHERE numero_dpe NOT IN ({ids}) ORDER BY {order}) TO '{dest}'"
+                f" (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group})"
+            )
+        if gone:
+            rewritten.append(dept)
+        rows[dept] = part["rows"] - len(gone)
+
+    for name in ("numero-exceptions.parquet", "scale-violation.parquet"):
+        src = _url(root, "index", name)
+        dest = out / "index" / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        _copy(src, dest)
+
+    write_manifest(manifest, manifest, rows, out)
+    duck.close()
+    return rewritten
 
 
 # --- alerting ---------------------------------------------------------------
