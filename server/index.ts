@@ -15,7 +15,18 @@
  * See CLAUDE.md section 9 and ADR-0003.
  */
 
-import { authFor, callerFrom, ensureMigrated, type Caller } from './db'
+import {
+  authFor,
+  callerFrom,
+  deleteSavedBuilding,
+  deleteSavedSearch,
+  ensureMigrated,
+  listSavedBuildings,
+  listSavedSearches,
+  saveBuilding,
+  saveSearch,
+  type Caller,
+} from './db'
 
 type Scope = 'public' | 'self' | 'owner'
 
@@ -67,7 +78,92 @@ export const ROUTES: Route[] = [
       return json({ id, name, email })
     },
   },
+
+  // --- saved buildings ----------------------------------------------------
+  {
+    method: 'GET',
+    path: '/api/buildings',
+    scope: 'owner',
+    handle: async ({ env, caller }) => json(await listSavedBuildings(env, caller)),
+  },
+  {
+    method: 'POST',
+    path: '/api/buildings',
+    scope: 'owner',
+    handle: async ({ request, env, caller }) => {
+      const body = await readJson(request)
+      const numeroDpe = str(body.numeroDpe)
+      if (!numeroDpe) return json({ error: 'numeroDpe is required' }, 400)
+      const note = body.note == null ? null : str(body.note)
+      const rows = await saveBuilding(env, caller, { id: crypto.randomUUID(), numeroDpe, note })
+      return json(rows[0] ?? null, 201)
+    },
+  },
+  {
+    method: 'DELETE',
+    path: '/api/buildings/:id',
+    scope: 'owner',
+    handle: async ({ env, caller, params }) => {
+      const rows = await deleteSavedBuilding(env, caller, params.id as string)
+      // 404, never 403: telling a stranger that an id exists but is not theirs
+      // is itself a disclosure, and there is nothing to gain by it.
+      return rows.length ? json(rows[0]) : json({ error: 'not found' }, 404)
+    },
+  },
+
+  // --- saved searches -----------------------------------------------------
+  {
+    method: 'GET',
+    path: '/api/searches',
+    scope: 'owner',
+    handle: async ({ env, caller }) => json(await listSavedSearches(env, caller)),
+  },
+  {
+    method: 'POST',
+    path: '/api/searches',
+    scope: 'owner',
+    handle: async ({ request, env, caller }) => {
+      const body = await readJson(request)
+      const name = str(body.name)
+      if (!name) return json({ error: 'name is required' }, 400)
+      if (body.spec == null || typeof body.spec !== 'object') {
+        return json({ error: 'spec must be an object' }, 400)
+      }
+      const visibility = body.visibility === 'unlisted' ? 'unlisted' : 'private'
+      const rows = await saveSearch(env, caller, {
+        id: crypto.randomUUID(),
+        name,
+        spec: body.spec,
+        visibility,
+      })
+      return json(rows[0] ?? null, 201)
+    },
+  },
+  {
+    method: 'DELETE',
+    path: '/api/searches/:id',
+    scope: 'owner',
+    handle: async ({ env, caller, params }) => {
+      const rows = await deleteSavedSearch(env, caller, params.id as string)
+      return rows.length ? json(rows[0]) : json({ error: 'not found' }, 404)
+    },
+  },
 ]
+
+/** Bodies are validated by hand; a schema library is not worth a dependency here. */
+async function readJson(request: Request): Promise<Record<string, unknown>> {
+  try {
+    const body = await request.json()
+    return body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** A non-empty string, or ''. Never coerces an object or a number into one. */
+function str(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
