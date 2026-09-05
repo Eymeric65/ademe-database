@@ -179,6 +179,7 @@ compared against live ADEME records. That test is the definition of "lossless" h
 | `uv run pytest -m "not live"` | ETL tests, offline |
 | `uv run pytest -m live` | ETL tests against the live ADEME API |
 | `uv run python -m ademe.ingest --dept 09` | load one département into the local SQLite build |
+| `uv run python -m ademe.finalise` | indexes, `foreign_key_check`, ANALYZE, row count |
 | `uv run python -m ademe.export_parquet` | SQLite → partitioned Parquet |
 
 ## Layout

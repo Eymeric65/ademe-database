@@ -182,9 +182,15 @@ def indexes_ddl() -> list[str]:
     return [
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe(numero_dpe)",
         "CREATE INDEX IF NOT EXISTS ix_dpe_adresse ON dpe(adresse_id)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_adresse_ban ON adresse(identifiant_ban)",
+        # TRAP: not UNIQUE. `ingest.adresse_id` keys on the whole address tuple
+        # rather than on identifiant_ban, because certificates sharing a BAN
+        # identifier disagree on the street text. Several `adresse` rows per
+        # identifier is the designed behaviour; a UNIQUE index here fails on
+        # the real data, and did.
+        "CREATE INDEX IF NOT EXISTS ix_adresse_ban ON adresse(identifiant_ban)",
         "CREATE INDEX IF NOT EXISTS ix_adresse_commune ON adresse(code_insee)",
-        "CREATE INDEX IF NOT EXISTS ix_commune_dept ON commune(code_departement)",
+        # `code_departement` is a vocabulary reference, so the column is _id.
+        "CREATE INDEX IF NOT EXISTS ix_commune_dept ON commune(code_departement_id)",
     ]
 
 
