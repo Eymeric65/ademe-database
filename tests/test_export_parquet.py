@@ -261,3 +261,54 @@ def test_lambert93_inverse_matches_ademes_own_geopoint(numero, x, y, lat, lon):
     glat, glon = geo.to_wgs84(x, y)
     assert abs(glat - lat) < 1e-9, f"{numero} latitude off by {abs(glat - lat):.2e}"
     assert abs(glon - lon) < 1e-9, f"{numero} longitude off by {abs(glon - lon):.2e}"
+
+
+# --- coordinates outside Lambert-93's domain --------------------------------
+
+# Measured from the live API. ADEME publishes `_geopoint` for these by applying
+# the Lambert-93 inverse to coordinates that are NOT in Lambert-93 -- the
+# overseas departements use local UTM zones -- so their own values land on the
+# wrong continent. The x/y here are real; the "ademe_says" column is what their
+# _geopoint returns for that row.
+OVERSEAS = [
+    ("971", 653431.02, 1774592.38, (6.12, 2.66)),      # Guadeloupe -> Benin
+    ("972", 719680.07, 1601062.96, (4.87, 3.14)),      # Martinique -> Gulf of Guinea
+    ("973", 351398.0, 516336.1, (-2.59, 0.73)),        # Guyane -> Atlantic
+    ("974", 320828.97, 7676122.5, (56.01, -3.00)),     # Reunion -> Scotland
+    ("976", 521607.39, 8583361.04, (63.99, -0.46)),    # Mayotte -> Norway
+]
+
+
+@pytest.mark.parametrize("dept,x,y,ademe_says", OVERSEAS)
+def test_overseas_coordinates_are_published_as_null_not_as_the_wrong_continent(
+    dept, x, y, ademe_says
+):
+    """A pin on the wrong continent is worse than no pin.
+
+    `geo.to_wgs84` is the Lambert-93 inverse and is correct for metropolitan
+    France to ~1e-13 degrees. Applied to a UTM 20N/22N/40S coordinate it
+    returns a plausible-looking number that is thousands of kilometres wrong --
+    which is exactly what ADEME's own `_geopoint` does for these departements.
+    Reproducing their arithmetic would be lossless and useless.
+    """
+    assert not geo.is_lambert93(dept), f"{dept} is not metropolitan France"
+
+    # The bug being avoided: the transform does run, and does return the same
+    # wrong answer ADEME publishes. Nothing here is hypothetical.
+    wrong_lat, wrong_lon = geo.to_wgs84(x, y)
+    assert abs(wrong_lat - ademe_says[0]) < 0.01
+    assert abs(wrong_lon - ademe_says[1]) < 0.01
+
+    assert geo.wgs84_for(dept, x, y) == (None, None)
+
+
+def test_metropolitan_coordinates_are_still_derived():
+    """The other half: the guard must not blank the 99.94% that are correct."""
+    for dept in ("09", "75", "2A", "2B"):
+        assert geo.is_lambert93(dept)
+    lat, lon = geo.wgs84_for("09", 604356.72, 6202312.65)
+    # Rounded to the DECIMAL(10,6) the column declares -- about 0.1 m. The
+    # projection itself agrees with ADEME to ~1e-13; this bound is the storage
+    # precision, not the arithmetic's.
+    assert lat is not None and abs(lat - 42.91384797010697) < 1e-6
+    assert lon is not None and abs(lon - 1.8297960439175422) < 1e-6

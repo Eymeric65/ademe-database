@@ -65,3 +65,32 @@ def to_wgs84(x: float, y: float) -> tuple[float, float]:
         phi = pi / 2 - 2 * atan(t * ((1 - _E * sin(phi)) / (1 + _E * sin(phi))) ** (_E / 2))
 
     return phi * 180 / pi, (theta / _N + _LON0 * pi / 180) * 180 / pi
+
+
+# The projection is metropolitan France's, and only metropolitan France's. The
+# overseas departements use local UTM zones -- 20N for the Antilles, 22N for
+# Guyane, 40S for Reunion and Mayotte -- and 975/977/978 their own again.
+#
+# TRAP: to_wgs84 does not fail on those coordinates. It returns a plausible
+# number that is thousands of kilometres wrong, which is precisely what ADEME's
+# own `_geopoint` does: Reunion comes out in Scotland and Mayotte in Norway.
+# Reproducing that would be lossless and useless, so the coordinate is dropped
+# instead. See ADR-0011.
+OVERSEAS_PREFIX = "97"
+
+
+def is_lambert93(dept: str) -> bool:
+    """True when this departement's coordinates really are EPSG:2154."""
+    return not str(dept).startswith(OVERSEAS_PREFIX)
+
+
+def wgs84_for(dept: str, x: float | None, y: float | None) -> tuple[float | None, float | None]:
+    """(lat, lon) for a certificate, or (None, None) where it cannot be known.
+
+    A pin on the wrong continent is worse than no pin: it is indistinguishable
+    from a correct one until somebody opens the map.
+    """
+    if x is None or y is None or not is_lambert93(dept):
+        return None, None
+    lat, lon = to_wgs84(x, y)
+    return round(lat, 6), round(lon, 6)

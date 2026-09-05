@@ -241,13 +241,15 @@ def _geopoint_rows(conn, codes: list[str]) -> list[tuple[int, float | None, floa
         codes,
     ).fetchall()
     scale = 10**6
+    # One departement per call, so the projection question is answered once.
+    lambert = any(geo.is_lambert93(c) for c in codes)
     out = []
     for dpe_id, x, y in rows:
-        if x is None or y is None:
+        if x is None or y is None or not lambert:
             out.append((dpe_id, None, None))
             continue
-        lat, lon = geo.to_wgs84(x / scale, y / scale)
-        out.append((dpe_id, round(lat, 6), round(lon, 6)))
+        lat, lon = geo.wgs84_for(codes[0], x / scale, y / scale)
+        out.append((dpe_id, lat, lon))
     return out
 
 
