@@ -1,10 +1,15 @@
 name: ETL weekly delta
 
-# Manual only for now. The cron arrives with PR 9, once deletions are handled:
-# the delta cannot see a certificate that LEFT the dataset, so scheduling this
-# before reconciliation exists would let the published files drift upwards
-# forever, quietly. See ADR-0007.
+# The schedule is only safe now that reconciliation exists. The delta cannot see
+# a certificate that LEFT the dataset -- dpe03existant is a virtual view filtered
+# dpe_desactive = 0 -- so scheduling this before ADR-0007 would have automated
+# the drift rather than the update.
+#
+# 04:10 UTC Monday: off-peak in CET, and away from the top of the hour where
+# everybody else's cron lands on ADEME.
 on:
+  schedule:
+    - cron: '10 4 * * 1'
   workflow_dispatch:
     inputs:
       since:
@@ -37,6 +42,14 @@ jobs:
             --base-url "$DATA_BASE_URL" \
             --out out \
             ${{ github.event.inputs.since && format('--since {0}', github.event.inputs.since) || '' }}
+
+      # After the merge, before the upload: a run that cannot reconcile has
+      # published nothing. Additions arrive through the delta above, so anything
+      # still missing here left the dataset. See ADR-0007.
+      - name: Reconcile against ADEME
+        run: |
+          uv run python scripts/reconcile.py --root out/v1 --out reconciled
+          if [ -d reconciled/v1 ]; then rm -rf out && mv reconciled out; fi
 
       - name: Check for a sharp departure
         run: uv run python scripts/check_delta.py --out out --base-url "$DATA_BASE_URL"

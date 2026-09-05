@@ -229,3 +229,165 @@ def test_the_incremental_key_really_filters():
     assert rows
     for r in rows:
         assert r["date_derniere_modification_dpe"] >= "2026-08-25"
+
+
+# --- reconciliation ---------------------------------------------------------
+
+
+class FakeApi:
+    """The api module's surface, with a fixed upstream. Stubbed at that
+    boundary rather than at HTTP so the tests state what ADEME holds, which is
+    the only thing reconcile actually reasons about."""
+
+    def __init__(self, by_dept: dict[str, list[str]], *, lie_about_total: int | None = None):
+        self.by_dept = by_dept
+        self.lie = lie_about_total
+        self.pulled: list[str] = []
+
+    def total(self, _client, *, departement=None, qs=None):
+        if self.lie is not None and departement is not None:
+            return self.lie
+        if departement is not None:
+            return len(self.by_dept.get(departement, []))
+        return sum(len(v) for v in self.by_dept.values())
+
+    def iter_pages(self, _client, *, departement=None, qs=None, select=None, **_kw):
+        if departement is not None:
+            self.pulled.append(departement)
+            rows = [{"numero_dpe": n} for n in self.by_dept.get(departement, [])]
+        else:
+            # A numero_dpe:(a OR b) fetch of specific certificates.
+            wanted = {w.strip('"') for w in qs.split("(", 1)[1].rstrip(")").split(" OR ")}
+            rows = [{"numero_dpe": n} for v in self.by_dept.values() for n in v if n in wanted]
+
+        class Page:
+            def __init__(self, rows):
+                self.rows, self.next_url, self.nbytes = rows, None, 0
+
+        yield Page(rows)
+
+
+def test_reconcile_finds_what_left_the_dataset(base, tmp_path, monkeypatch):
+    """The delta cannot see a deletion.
+
+    dpe03existant is a virtual dataset filtered `dpe_desactive = 0`, and the
+    field is not in the public schema. A deactivated certificate simply leaves
+    the view; `date_derniere_modification_dpe > mark` never returns it, and an
+    upsert-only merge keeps it forever. See ADR-0007.
+    """
+    published, _ = base
+
+    # Upstream no longer has 2409E0000002. This is the state AFTER the delta
+    # has run, which is the order the job uses: additions arrive through the
+    # delta, so anything still missing here left the dataset.
+    fake = FakeApi({"09": ["2409E0000001"], "31": ["2431E0000001"]})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+
+    report = delta.reconcile(None, published)
+
+    assert report["09"].gone == ["2409E0000002"]
+    assert report["09"].appeared == []
+    # 31 matched on count alone, so its ids were never pulled -- that is the
+    # whole point of checking the total first.
+    assert "31" not in fake.pulled
+    assert "09" in fake.pulled
+
+
+def test_equal_numbers_of_deletions_and_additions_hide_from_the_count(
+    base, tmp_path, monkeypatch
+):
+    """A known blind spot, recorded rather than papered over.
+
+    Checking the total first is what keeps this job polite -- 248 MB and eight
+    minutes to pull every id. The cost is that one deletion plus one addition
+    in the same partition net out and the count still matches.
+
+    It is survivable because of the ORDER the job runs in: additions arrive
+    through the delta first, so by the time reconcile looks, an addition has
+    already raised the published count and a deletion shows as a shortfall.
+    This test pins the limitation so nobody discovers it as a surprise.
+    """
+    published, _ = base
+    fake = FakeApi({"09": ["2409E0000001", "2409E0000099"], "31": ["2431E0000001"]})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+
+    report = delta.reconcile(None, published)
+
+    assert fake.pulled == [], "counts matched, so no ids were pulled"
+    assert report["09"].clean(), "the swap is invisible to a count check -- see ADR-0007"
+
+
+def test_reconcile_pulls_no_ids_when_every_count_agrees(base, tmp_path, monkeypatch):
+    """248 MB and eight minutes for the full dataset. Pulling ids when the
+    counts already agree would spend that every week for nothing."""
+    published, _ = base
+    fake = FakeApi(
+        {"09": ["2409E0000001", "2409E0000002"], "31": ["2431E0000001"]}
+    )
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+
+    report = delta.reconcile(None, published)
+    assert fake.pulled == []
+    assert all(not r.gone and not r.appeared for r in report.values())
+
+
+def test_reconcile_refuses_when_upstream_contradicts_itself(base, tmp_path, monkeypatch):
+    """A total that disagrees with the ids behind it means the answer cannot be
+    trusted, and acting on it would delete rows on the strength of a number
+    that is wrong. Fail, and leave the manifest alone."""
+    published, _ = base
+    fake = FakeApi({"09": ["2409E0000001", "2409E0000002"], "31": ["2431E0000001"]},
+                   lie_about_total=7)
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+
+    with pytest.raises(delta.ReconcileError) as e:
+        delta.reconcile(None, published)
+    assert "09" in str(e.value)
+
+
+def test_apply_deletions_rewrites_the_partition_without_the_gone_rows(base, tmp_path, monkeypatch):
+    published, _ = base
+    fake = FakeApi({"09": ["2409E0000001"], "31": ["2431E0000001"]})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+
+    report = delta.reconcile(None, published)
+    out = tmp_path / "reconciled"
+    delta.apply_deletions(published, report, out)
+
+    d = duckdb.connect()
+    left = [
+        r[0]
+        for r in d.execute(
+            f"SELECT numero_dpe FROM read_parquet('{out / 'dpe' / 'dept=09' / 'part-0000.parquet'}')"
+            " ORDER BY numero_dpe"
+        ).fetchall()
+    ]
+    assert left == ["2409E0000001"]
+
+    m = json.loads((out / "manifest.json").read_text())
+    assert {p["dept"]: p["rows"] for p in m["partitions"]} == {"09": 1, "31": 1}
+
+
+@pytest.mark.live
+def test_the_id_pull_agrees_with_the_total_upstream():
+    """reconcile trusts `total` enough to pull ids on a mismatch, and trusts
+    the ids enough to delete on a difference. If those two disagreed upstream,
+    every week's reconciliation would be acting on noise."""
+    from ademe import api
+
+    client = api.client()
+    code = "975"
+    reported = api.total(client, departement=code)
+    ids = [
+        r["numero_dpe"]
+        for page in api.iter_pages(client, departement=code, select=["numero_dpe"], page_size=10000)
+        for r in page.rows
+    ]
+    assert reported > 0
+    assert len(ids) == reported, f"total says {reported}, the id pull returned {len(ids)}"
+    assert len(set(ids)) == len(ids), "upstream returned a duplicate numero_dpe"
