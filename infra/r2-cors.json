@@ -1,15 +1,20 @@
-[
-  {
-    "AllowedOrigins": [
-      "https://recherche-maison.com",
-      "https://www.recherche-maison.com",
-      "https://*.workers.dev",
-      "http://localhost:8787",
-      "http://localhost:5180"
-    ],
-    "AllowedMethods": ["GET", "HEAD"],
-    "AllowedHeaders": ["Range"],
-    "ExposeHeaders": ["Content-Range", "Content-Length", "ETag"],
-    "MaxAgeSeconds": 86400
-  }
-]
+{
+  "rules": [
+    {
+      "id": "browser-reads-parquet",
+      "allowed": {
+        "origins": [
+          "https://recherche-maison.com",
+          "https://www.recherche-maison.com",
+          "https://*.eymeric-chauchat.workers.dev",
+          "http://localhost:8787",
+          "http://localhost:5180"
+        ],
+        "methods": ["GET", "HEAD"],
+        "headers": ["Range", "Content-Type"]
+      },
+      "exposeHeaders": ["Content-Range", "Content-Length", "ETag", "Accept-Ranges"],
+      "maxAgeSeconds": 86400
+    }
+  ]
+}
