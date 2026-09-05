@@ -1,0 +1,40 @@
+import { defineConfig, devices } from '@playwright/test'
+
+/**
+ * E2E runs against the WORKER, not against Vite.
+ *
+ * The built assets and the API have to be on one origin, because that is how
+ * production serves them and because the session cookie is same-origin. A
+ * harness that ran Vite on 5180 and wrangler on 8787 would pass while the real
+ * thing was broken -- which is the failure this suite exists to catch.
+ *
+ * E2E_BASE_URL points the same specs at a deployed preview; when it is set the
+ * local server is not started at all.
+ */
+const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:8787'
+
+export default defineConfig({
+  testDir: './test/e2e',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 1 : 0,
+  reporter: process.env.CI ? [['html'], ['list']] : 'list',
+  use: {
+    baseURL,
+    trace: 'on-first-retry',
+  },
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  ...(process.env.E2E_BASE_URL
+    ? {}
+    : {
+        webServer: {
+          command: 'npm run build && npx wrangler dev --port 8787',
+          // /api/health is the readiness probe on purpose: it answers only
+          // once the Worker is up AND the migrations have run, so a spec never
+          // races an empty database.
+          url: 'http://localhost:8787/api/health',
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+      }),
+})

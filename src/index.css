@@ -1,0 +1,54 @@
+/* Hand-written, and staying that way: no Tailwind, no component library. */
+
+:root {
+  --ink: #17201c;
+  --paper: #fbfaf7;
+  --rule: #ddd8cd;
+  --muted: #5d675f;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e9ece8;
+    --paper: #14171a;
+    --rule: #2c3237;
+    --muted: #98a29b;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0.04em;
+}
+
+main {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+.lede {
+  color: var(--muted);
+  max-width: 44ch;
+}
