@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+# A superseded push has nothing to say. `main` is never built here: it is only
+# ever reached through a PR from dev, which was already green.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  etl:
+    runs-on: ubuntu-latest
+    env:
+      # TRAP: with CI set, a missing dependency is a hard failure rather than a
+      # skip. A green run that silently tested nothing is worse than a red one,
+      # because it looks like evidence (CLAUDE.md section 3).
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run pytest -m "not live"
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # 77 MB of engine, copied from node_modules rather than committed. The
+      # fixture server serves it the way R2 will. See ADR-0009.
+      - run: npm run stage:duckdb
+      # Runs against `wrangler dev` -- built assets and the API on one origin,
+      # the same shape as production. See playwright.config.ts.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7
