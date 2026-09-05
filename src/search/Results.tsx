@@ -38,7 +38,11 @@ export function Results({ hits, ran }: { hits: Hit[]; ran: boolean }) {
               <Badge letter={hit.etiquette_ges} />
             </div>
             <div className="hit-body">
-              <p className="hit-address">{hit.adresse_ban ?? 'Adresse non géocodée'}</p>
+              <p className="hit-address">
+                <a href={`#/dpe/${encodeURIComponent(hit.numero_dpe)}`}>
+                  {hit.adresse_ban ?? hit.numero_dpe}
+                </a>
+              </p>
               <p className="hit-meta">
                 {[
                   hit.nom_commune_ban,

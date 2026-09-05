@@ -395,10 +395,20 @@ def write_manifest(conn, root: Path, partitions: list[dict]) -> dict:
         "high_water": (date(1970, 1, 1) + timedelta(days=int(high))).isoformat()
         if high is not None
         else None,
+        # encoding and scale so a delta can rebuild a partition without the
+        # SQLite build; `destination` because it is the only grouping of the 226
+        # columns that means anything, and the browser has no other source for
+        # it -- a detail view that grouped on the column NAME would produce
+        # dozens of one-item groups called "annee" and "apport".
         "column_meta": {
-            r["column_name"]: {"encoding": r["encoding"], "scale": r["scale"]}
+            r["column_name"]: {
+                "encoding": r["encoding"],
+                "scale": r["scale"],
+                "destination": r["destination"],
+            }
             for r in conn.execute(
-                "SELECT column_name, encoding, scale FROM column_meta ORDER BY column_name"
+                "SELECT column_name, encoding, scale, destination FROM column_meta"
+                " ORDER BY column_name"
             )
         },
         "search_columns": list(SEARCH_COLUMNS),

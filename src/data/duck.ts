@@ -30,9 +30,12 @@ const BASE = (import.meta.env.VITE_DATA_BASE_URL as string | undefined) ?? '/dat
  */
 const VENDOR = `${new URL(BASE, window.location.href).origin}/vendor/duckdb`
 
+export type ColumnMeta = { encoding: string; scale: number; destination: string }
+
 export type Manifest = {
   version: string
   high_water: string | null
+  column_meta: Record<string, ColumnMeta>
   partitions: { dept: string; rows: number; codes?: string[] }[]
 }
 
@@ -155,25 +158,37 @@ function predicates(spec: QuerySpec): Bound[] {
 export const LIMIT = 50
 
 /**
- * DECIMAL columns, cast to DOUBLE for the browser.
+ * `SELECT * REPLACE (...)` casting every DECIMAL column to DOUBLE.
  *
  * TRAP: Arrow hands a DECIMAL back as its UNSCALED INTEGER. Read raw, a
  * latitude of 42.971021 arrives as 42971021 and a 176.4 m² flat as 1764 -- both
- * plausible enough to render without anything looking broken, which is how this
- * survived the first two assertions and was only caught by checking the map
- * link's actual coordinates.
+ * plausible enough to render without anything looking broken. It was caught in
+ * the search results only because a test checked the map link's actual
+ * coordinates, and then AGAIN in the detail view, which has ~104 more of them.
  *
- * DOUBLE is right HERE and nowhere else: ADR-0004's scaled integers are about
- * storing and reconstructing the source, which the ETL has already done by the
- * time these bytes exist. This is display.
+ * Derived from the manifest rather than listed here, so a column that changes
+ * encoding cannot be forgotten. DOUBLE is right HERE and nowhere else:
+ * ADR-0004's scaled integers are about storing and reconstructing the source,
+ * which the ETL has already done by the time these bytes exist. This is display.
  */
-const DECIMALS = [
+async function decimalReplace(present?: (name: string) => boolean): Promise<string> {
+  const meta = (await manifest()).column_meta ?? {}
+  const names = Object.entries(meta)
+    .filter(([, m]) => m.encoding === 'scaled' && m.scale > 1)
+    .map(([name]) => name)
+  // lat/lon are derived at export and are not in column_meta.
+  const all = [...names, 'lat', 'lon'].filter((n) => !present || present(n))
+  return all.map((c) => `CAST("${c}" AS DOUBLE) AS "${c}"`).join(', ')
+}
+
+/** The 17 columns the search index carries. */
+const SEARCH_DECIMALS = [
   'surface_habitable_logement',
   'conso_5_usages_par_m2_ep',
   'emission_ges_5_usages_par_m2',
   'lat',
   'lon',
-] as const
+]
 
 export async function search(spec: QuerySpec): Promise<Hit[]> {
   const files = await filesFor(spec)
@@ -191,7 +206,7 @@ export async function search(spec: QuerySpec): Promise<Hit[]> {
       : 'ORDER BY code_postal_ban, etiquette_dpe'
 
   const list = files.map((f) => `'${f}'`).join(', ')
-  const replace = DECIMALS.map((c) => `CAST("${c}" AS DOUBLE) AS "${c}"`).join(', ')
+  const replace = await decimalReplace((n) => SEARCH_DECIMALS.includes(n))
   const sql =
     `SELECT * REPLACE (${replace}) FROM read_parquet([${list}])` +
     ` WHERE ${where} ${order} LIMIT ${LIMIT}`
@@ -226,5 +241,72 @@ function normalise(row: Record<string, unknown>): Hit {
     periode_construction: (row.periode_construction as string) ?? null,
     lat: num(row.lat),
     lon: num(row.lon),
+  }
+}
+
+
+// --- detail -----------------------------------------------------------------
+
+let exceptionsPromise: Promise<Map<string, string>> | null = null
+
+/**
+ * Certificates whose numero does not encode their own partition.
+ *
+ * `numero_dpe[2:4]` is the departement for the overwhelming majority, which is
+ * what makes a detail read one file rather than ninety-six. The exceptions file
+ * exists because "overwhelming majority" is not "all", and a certificate the
+ * shortcut gets wrong would otherwise be unreachable. See ADR-0006.
+ */
+async function exceptions(): Promise<Map<string, string>> {
+  exceptionsPromise ??= (async () => {
+    const conn = await (await db()).connect()
+    try {
+      const rows = await conn.query(
+        `SELECT numero_dpe, dept FROM read_parquet('${BASE}/index/numero-exceptions.parquet')`,
+      )
+      return new Map(
+        rows.toArray().map((r) => {
+          const o = r.toJSON() as { numero_dpe: string; dept: string }
+          return [String(o.numero_dpe), String(o.dept)]
+        }),
+      )
+    } finally {
+      await conn.close()
+    }
+  })()
+  return exceptionsPromise
+}
+
+/** The partition a certificate's own number implies. */
+export function partitionOfNumero(numero: string): string {
+  const code = numero.slice(2, 4)
+  return code.startsWith('97') || code.startsWith('98') ? 'DOM' : code
+}
+
+/** Every one of the 226 columns, for one certificate. */
+export async function detail(numero: string): Promise<Record<string, unknown> | null> {
+  const m = await manifest()
+  const known = new Set(m.partitions.map((p) => p.dept))
+
+  const guess = partitionOfNumero(numero)
+  const override = (await exceptions()).get(numero)
+  const dept = override ?? guess
+  if (!known.has(dept)) return null
+
+  const file = `${BASE}/dpe/dept=${dept}/part-0000.parquet`
+  const conn = await (await db()).connect()
+  try {
+    // One row group of one partition, because the wide file is sorted by
+    // numero_dpe (ADR-0006).
+    const replace = await decimalReplace()
+    const stmt = await conn.prepare(
+      `SELECT * REPLACE (${replace}) FROM read_parquet('${file}') WHERE numero_dpe = ? LIMIT 1`,
+    )
+    const table = await stmt.query(numero)
+    const rows = table.toArray()
+    if (!rows.length) return null
+    return rows[0].toJSON() as Record<string, unknown>
+  } finally {
+    await conn.close()
   }
 }
