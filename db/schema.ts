@@ -25,8 +25,15 @@ import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-o
 const now = sql`(unixepoch())`
 
 // --- Better Auth -----------------------------------------------------------
-// Shape is dictated by Better Auth's Drizzle adapter; only the FK actions and
-// the timestamps are ours.
+// Shape is dictated by Better Auth's Drizzle adapter; only the FK actions are
+// ours.
+//
+// TRAP: every timestamp here is `{ mode: 'timestamp' }`, and that is not
+// cosmetic. Better Auth binds Date objects, and a plain `integer` column takes
+// them verbatim -- D1 then rejects the statement and sign-up fails with a bare
+// FAILED_TO_CREATE_USER that names nothing. The mode changes the TypeScript
+// type only; the generated SQL is identical, so there is no migration for it
+// and `db:check` stays clean. See ADR-0008.
 
 export const user = sqliteTable('user', {
   id: text('id').primaryKey(),
@@ -34,19 +41,19 @@ export const user = sqliteTable('user', {
   email: text('email').notNull(),
   emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
   image: text('image'),
-  createdAt: integer('created_at').notNull().default(now),
-  updatedAt: integer('updated_at').notNull().default(now),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now),
 }, (t) => [uniqueIndex('user_email_unique').on(t.email)])
 
 export const session = sqliteTable('session', {
   id: text('id').primaryKey(),
   token: text('token').notNull(),
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
-  expiresAt: integer('expires_at').notNull(),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
-  createdAt: integer('created_at').notNull().default(now),
-  updatedAt: integer('updated_at').notNull().default(now),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now),
 }, (t) => [
   uniqueIndex('session_token_unique').on(t.token),
   index('session_user_idx').on(t.userId),
@@ -59,13 +66,16 @@ export const account = sqliteTable('account', {
   providerId: text('provider_id').notNull(),
   accessToken: text('access_token'),
   refreshToken: text('refresh_token'),
-  accessTokenExpiresAt: integer('access_token_expires_at'),
-  refreshTokenExpiresAt: integer('refresh_token_expires_at'),
+  accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp' }),
+  refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp' }),
   scope: text('scope'),
   idToken: text('id_token'),
+  // Better Auth 1.7 writes this for OIDC providers. Absent, the adapter
+  // refuses the whole account model at runtime rather than at build time.
+  issuer: text('issuer'),
   password: text('password'),
-  createdAt: integer('created_at').notNull().default(now),
-  updatedAt: integer('updated_at').notNull().default(now),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now),
 }, (t) => [
   uniqueIndex('account_provider_unique').on(t.providerId, t.accountId),
   index('account_user_idx').on(t.userId),
@@ -75,9 +85,9 @@ export const verification = sqliteTable('verification', {
   id: text('id').primaryKey(),
   identifier: text('identifier').notNull(),
   value: text('value').notNull(),
-  expiresAt: integer('expires_at').notNull(),
-  createdAt: integer('created_at').notNull().default(now),
-  updatedAt: integer('updated_at').notNull().default(now),
+  expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now),
+  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now),
 }, (t) => [index('verification_identifier_idx').on(t.identifier)])
 
 // --- Owned application state ----------------------------------------------

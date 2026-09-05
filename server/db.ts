@@ -19,6 +19,8 @@
  * used to do for free.
  */
 
+import { betterAuth } from 'better-auth'
+import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { and, desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { migrate } from '../db/migrate'
@@ -157,4 +159,42 @@ let migrated: Promise<string[]> | null = null
 export function ensureMigrated(env: { DB: D1Database }): Promise<string[]> {
   migrated ??= migrate(env.DB)
   return migrated
+}
+
+// --- sessions --------------------------------------------------------------
+
+/**
+ * Better Auth, built for one request.
+ *
+ * Per request rather than per module because the D1 handle arrives on `env`,
+ * which only exists inside `fetch`. A module-level instance would have to
+ * capture the first request's binding and hand it to every later one.
+ *
+ * The drizzle handle goes INTO the adapter and never comes back out, so this
+ * module is still the only place that holds one and the grep test stays green.
+ *
+ * see ADR-0008
+ */
+export function authFor(env: Env, origin?: string) {
+  return betterAuth({
+    database: drizzleAdapter(open(env), { provider: 'sqlite', schema: s }),
+    secret: env.BETTER_AUTH_SECRET,
+    // Production pins this to the domain Google was told about. Previews leave
+    // it unset and fall back to the request's own origin, because every branch
+    // gets its own <alias>-ademe-app-preview host and no single value could be
+    // right for all of them.
+    baseURL: env.BETTER_AUTH_URL || origin,
+    basePath: '/api/auth',
+    socialProviders: {
+      google: {
+        clientId: env.GOOGLE_CLIENT_ID ?? '',
+        clientSecret: env.GOOGLE_CLIENT_SECRET ?? '',
+      },
+    },
+    // TRAP: production must never set AUTH_TEST_CREDENTIALS. This provider
+    // exists so CI can sign in as two users and prove one cannot read the
+    // other's rows -- a Google round-trip cannot be automated. Enabling it in
+    // production would add a password surface nobody intended to run.
+    emailAndPassword: { enabled: env.AUTH_TEST_CREDENTIALS === '1' },
+  })
 }

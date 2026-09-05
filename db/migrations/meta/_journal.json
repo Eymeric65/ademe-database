@@ -8,6 +8,13 @@
       "when": 1788526126355,
       "tag": "0000_init_app_plane",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1788597665303,
+      "tag": "0001_account_issuer",
+      "breakpoints": true
     }
   ]
 }
