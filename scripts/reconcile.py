@@ -20,7 +20,11 @@ from ademe import api, delta, export_parquet
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--root", type=Path, required=True, help="the v1/ directory to check")
+    # NOT type=Path. Path("https://x/v1") collapses the double slash to
+    # "https:/x/v1" and read_manifest then looks for a local file of that name.
+    # The published root is normally a URL, so this argument is a string and
+    # read_manifest branches on the scheme.
+    ap.add_argument("--root", required=True, help="the published v1/ directory or URL")
     ap.add_argument("--out", type=Path, help="where to write the corrected files")
     args = ap.parse_args(argv)
 
