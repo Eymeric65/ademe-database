@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useSession } from './auth'
 import { useRoute } from './routes'
 import { search, type Hit } from './data/duck'
+import { Detail } from './detail/Detail'
+import { Saved } from './saved/Saved'
 import { Results } from './search/Results'
 import { SearchForm } from './search/SearchForm'
 import type { QuerySpec } from './search/spec'
@@ -99,10 +101,9 @@ export default function App() {
 
       <main>
         {route.name === 'saved' ? (
-          <section>
-            <h1>Enregistrés</h1>
-            <p className="lede">Les certificats que vous gardez apparaîtront ici.</p>
-          </section>
+          <Saved signedIn={Boolean(account)} />
+        ) : route.name === 'detail' ? (
+          <Detail numero={route.numero} signedIn={Boolean(account)} />
         ) : (
           <Search />
         )}
