@@ -174,6 +174,7 @@ compared against live ADEME records. That test is the definition of "lossless" h
 | `npm run check` | tsc, vitest, test:db, db:check |
 | `npm run test:db` | vitest against real Miniflare D1 (`test/db/`) |
 | `npm run test:e2e` | Playwright, chromium |
+| `npm run stage:duckdb` | copy DuckDB-WASM out of node_modules for the e2e fixture server |
 | `npm run db:generate` | Drizzle generate + bundle migrations |
 | `npm run db:check` | regenerate and fail on a dirty diff |
 | `npm run preview` | upload a version, print the preview URL |

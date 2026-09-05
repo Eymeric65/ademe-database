@@ -1,0 +1,967 @@
+{
+  "version": "v1",
+  "built_at": "2026-09-05T09:49:19+00:00",
+  "schema_sha256": "62a7efcdfc5ac614c6038c47036c55ae3f3491d298d78bb09feadb2a860565c5",
+  "high_water": "2026-02-09",
+  "column_meta": {
+    "adresse_ban": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "adresse_brut": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "adresse_complete_brut": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "annee_construction": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "appartement_non_visite": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "apport_interne_saison_chauffe": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "apport_interne_saison_froide": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "apport_solaire_saison_chauffe": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "apport_solaire_saison_froide": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "besoin_chauffage": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "besoin_ecs": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "besoin_ecs_batiment": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "besoin_ecs_logement": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "besoin_refroidissement": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "categorie_enr": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "classe_altitude": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "classe_inertie_batiment": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "code_departement_ban": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "code_insee_ban": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "code_postal_ban": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "code_postal_brut": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "code_region_ban": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "complement_adresse_batiment": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "complement_adresse_logement": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "configuration_installation_chauffage_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "configuration_installation_chauffage_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "configuration_installation_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "conso_5_usages_ef": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_5_usages_ef_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_5_usages_ef_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_5_usages_ef_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_5_usages_ep": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_5_usages_par_m2_ef": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_5_usages_par_m2_ep": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_auxiliaires_ef": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_auxiliaires_ep": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_ef": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_ef_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_ef_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_ef_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_ep": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_generateur_n1_installation_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_generateur_n1_installation_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_generateur_n2_installation_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_generateur_n2_installation_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_installation_chauffage_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_chauffage_installation_chauffage_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_eclairage_ef": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_eclairage_ep": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ecs_ef": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ecs_ef_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ecs_ef_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ecs_ef_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ecs_ep": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ef_generateur_n1_ecs_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ef_generateur_n2_ecs_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_ef_installation_ecs_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_refroidissement_annuel": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_refroidissement_ef": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "conso_refroidissement_ep": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "coordonnee_cartographique_x_ban": {
+      "encoding": "scaled",
+      "scale": 1000000
+    },
+    "coordonnee_cartographique_y_ban": {
+      "encoding": "scaled",
+      "scale": 1000000
+    },
+    "cop_generateur_n1_ecs_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cop_generateur_n2_ecs_n1": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "cout_auxiliaires": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_chauffage": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_chauffage_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_chauffage_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_chauffage_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_eclairage": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_ecs": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_ecs_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_ecs_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_ecs_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_refroidissement": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_total_5_usages": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_total_5_usages_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_total_5_usages_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "cout_total_5_usages_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "date_derniere_modification_dpe": {
+      "encoding": "date",
+      "scale": 1
+    },
+    "date_etablissement_dpe": {
+      "encoding": "date",
+      "scale": 1
+    },
+    "date_fin_validite_dpe": {
+      "encoding": "date",
+      "scale": 1
+    },
+    "date_installation_generateur_n1_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "date_installation_generateur_n2_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "date_reception_dpe": {
+      "encoding": "date",
+      "scale": 1
+    },
+    "date_visite_diagnostiqueur": {
+      "encoding": "date",
+      "scale": 1
+    },
+    "deperditions_baies_vitrees": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "deperditions_enveloppe": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "deperditions_murs": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "deperditions_planchers_bas": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "deperditions_planchers_hauts": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "deperditions_ponts_thermiques": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "deperditions_portes": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "deperditions_renouvellement_air": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "description_generateur_chauffage_n1_installation_n1": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "description_generateur_chauffage_n1_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "description_generateur_chauffage_n2_installation_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "description_generateur_chauffage_n2_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "description_generateur_froid": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "description_generateur_n1_ecs_n1": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "description_generateur_n2_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "description_installation_chauffage_n1": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "description_installation_chauffage_n2": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "description_installation_ecs_n1": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "electricite_pv_autoconsommee": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_5_usages": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_5_usages_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_5_usages_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_5_usages_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_5_usages_par_m2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_auxiliaires": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_chauffage": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_chauffage_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_chauffage_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_chauffage_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_eclairage": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_ecs": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_ecs_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_ecs_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_ecs_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "emission_ges_refroidissement": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "etiquette_dpe": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "etiquette_ges": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "facteur_couverture_solaire_installation_chauffage_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "facteur_couverture_solaire_installation_chauffage_n2": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "facteur_couverture_solaire_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "facteur_couverture_solaire_saisi_installation_chauffage_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "facteur_couverture_solaire_saisi_installation_chauffage_n2": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "facteur_couverture_solaire_saisi_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "hauteur_sous_plafond": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "id_rnb": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "identifiant_ban": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "indicateur_confort_ete": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "inertie_lourde": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "isolation_toiture": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "logement_traversant": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "methode_application_dpe": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "modele_dpe": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "nom_commune_ban": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "nom_commune_brut": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "nom_residence": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "nom_rue_ban": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "nombre_appartement": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "nombre_logements_desservis_par_installation_ecs_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "nombre_module": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "nombre_niveau_immeuble": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "nombre_niveau_logement": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "numero_dpe": {
+      "encoding": "text",
+      "scale": 1
+    },
+    "numero_dpe_immeuble_associe": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "numero_dpe_remplace": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "numero_etage_appartement": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "numero_immatriculation_copropriete": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "numero_rpls_logement": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "numero_voie_ban": {
+      "encoding": "vocab_open",
+      "scale": 1
+    },
+    "periode_construction": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "periode_installation_generateur_froid": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "position_logement_dans_immeuble": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "presence_brasseur_air": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "presence_production_pv": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "production_ecs_solaire_installation_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "production_electricite_pv_kwhep_par_an": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "protection_solaire_exterieure": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "provenance_id_rnb": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "qualite_isolation_enveloppe": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "qualite_isolation_menuiseries": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "qualite_isolation_murs": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "qualite_isolation_plancher_bas": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "qualite_isolation_plancher_haut_comble_amenage": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "qualite_isolation_plancher_haut_comble_perdu": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "qualite_isolation_plancher_haut_toit_terrasse": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "score_ban": {
+      "encoding": "scaled",
+      "scale": 100
+    },
+    "statut_geocodage": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "surface_chauffee_installation_chauffage_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_chauffee_installation_chauffage_n2": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_climatisee": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_habitable_desservie_par_installation_ecs_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_habitable_immeuble": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_habitable_logement": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_tertiaire_immeuble": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_totale_capteurs_pv": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "surface_ventilee": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "systeme_production_electricite_origine_renouvelable": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_batiment": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_emetteur_installation_chauffage_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_emetteur_installation_chauffage_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_climatisation": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_generateur_n1_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_generateur_n1_installation_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_generateur_n1_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_generateur_n2_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_generateur_n2_installation_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_generateur_n2_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_n3": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_principale_chauffage": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_energie_principale_ecs": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_chauffage_principal": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_chauffage_principal_ecs": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_froid": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_n1_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_n1_installation_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_n1_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_n2_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_n2_installation_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_generateur_n2_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_installation_chauffage": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_installation_chauffage_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_installation_chauffage_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_installation_ecs": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_installation_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_installation_solaire_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "type_ventilation": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "typologie_logement": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "ubat_w_par_m2_k": {
+      "encoding": "scaled",
+      "scale": 100
+    },
+    "usage_generateur_n1_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "usage_generateur_n1_installation_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "usage_generateur_n1_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "usage_generateur_n2_ecs_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "usage_generateur_n2_installation_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "usage_generateur_n2_installation_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    },
+    "ventilation_posterieure_2012": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "version_dpe": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "volume_stockage_generateur_n1_ecs_n1": {
+      "encoding": "scaled",
+      "scale": 10
+    },
+    "volume_stockage_generateur_n2_ecs_n1": {
+      "encoding": "int",
+      "scale": 1
+    },
+    "zone_climatique": {
+      "encoding": "vocab_closed",
+      "scale": 1
+    }
+  },
+  "search_columns": [
+    "numero_dpe",
+    "code_departement_ban",
+    "code_postal_ban",
+    "code_insee_ban",
+    "nom_commune_ban",
+    "adresse_ban",
+    "etiquette_dpe",
+    "etiquette_ges",
+    "date_etablissement_dpe",
+    "surface_habitable_logement",
+    "conso_5_usages_par_m2_ep",
+    "emission_ges_5_usages_par_m2",
+    "type_batiment",
+    "periode_construction",
+    "annee_construction",
+    "lat",
+    "lon"
+  ],
+  "partitions": [
+    {
+      "dept": "09",
+      "codes": [
+        "09"
+      ],
+      "rows": 400,
+      "search": {
+        "path": "search/dept=09/part-0000.parquet",
+        "bytes": 18715,
+        "sha256": "3d99cd7b7a08b54b09d46e86d987a45e9fa0c76d5923b262c30ea06f71cf1d6a"
+      },
+      "dpe": {
+        "path": "dpe/dept=09/part-0000.parquet",
+        "bytes": 176752,
+        "sha256": "4a1ebbe5bf10c1802cbb354a449ca3ce520529e3248fca1c21c0913ecea5da28"
+      }
+    },
+    {
+      "dept": "48",
+      "codes": [
+        "48"
+      ],
+      "rows": 400,
+      "search": {
+        "path": "search/dept=48/part-0000.parquet",
+        "bytes": 18883,
+        "sha256": "2ba13738cdc8a5edc5fd6692dff4c16ab02468b3450daf65cacf5a9a5e034bbc"
+      },
+      "dpe": {
+        "path": "dpe/dept=48/part-0000.parquet",
+        "bytes": 171178,
+        "sha256": "184f47510d0e904e9823b210b079dee756a47fb498c55140d70914b2493b0152"
+      }
+    }
+  ]
+}
