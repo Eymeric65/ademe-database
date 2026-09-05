@@ -1,0 +1,221 @@
+/*
+ * Hand-written, and staying that way: no Tailwind, no component library.
+ *
+ * The palette is the official DPE ramp from the French arrêté -- the same
+ * colours printed on every listing. It is data colour, not decoration: a letter
+ * always appears in its own band's colour, so the page and the certificate
+ * agree. Everything else is deliberately quiet.
+ */
+
+:root {
+  --paper: #f7f7f4;
+  --raised: #ffffff;
+  --ink: #14180f;
+  --muted: #5e675a;
+  --rule: #dcded4;
+  --accent: #1f7a33; /* DPE band A: the efficient end, and the only accent */
+  --accent-ink: #ffffff;
+  --focus: #1f7a33;
+
+  /* The A-G ramp. Only ever applied to a letter. */
+  --dpe-a: #319834;
+  --dpe-b: #33cc31;
+  --dpe-c: #cbfc34;
+  --dpe-d: #fbfe06;
+  --dpe-e: #fbcc05;
+  --dpe-f: #fc9934;
+  --dpe-g: #fc0205;
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #101310;
+    --raised: #171b16;
+    --ink: #e8ebe4;
+    --muted: #9aa595;
+    --rule: #2a2f28;
+    --accent: #5cc96e;
+    --accent-ink: #0d160e;
+    --focus: #5cc96e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* --- masthead ----------------------------------------------------------- */
+
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0.85rem 1.25rem;
+  background: var(--raised);
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: inherit;
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* The one bold element on the page. Everything around it stays quiet. */
+.badge {
+  display: grid;
+  place-items: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  /* The D band is a light yellow; black type is the legible pairing, and it is
+     what the printed label uses. */
+  color: #14180f;
+  background: var(--dpe-d);
+}
+
+.badge[data-letter="A"] { background: var(--dpe-a); color: #fff; }
+.badge[data-letter="B"] { background: var(--dpe-b); }
+.badge[data-letter="C"] { background: var(--dpe-c); }
+.badge[data-letter="D"] { background: var(--dpe-d); }
+.badge[data-letter="E"] { background: var(--dpe-e); }
+.badge[data-letter="F"] { background: var(--dpe-f); }
+.badge[data-letter="G"] { background: var(--dpe-g); color: #fff; }
+
+.nav {
+  display: flex;
+  gap: 1.25rem;
+  margin-right: auto;
+}
+
+.nav a {
+  color: var(--muted);
+  text-decoration: none;
+  padding-bottom: 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.nav a:hover {
+  color: var(--ink);
+}
+
+.nav a[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  /* Reserve the row so the header does not jump when /api/me answers. */
+  min-height: 2.25rem;
+}
+
+.who {
+  color: var(--muted);
+  font-size: 0.9rem;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.signin {
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+}
+
+.signin:hover {
+  filter: brightness(1.06);
+}
+
+.link {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--ink);
+}
+
+/* --- content ------------------------------------------------------------ */
+
+main {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem;
+}
+
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.4rem);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-weight: 650;
+  max-width: 20ch;
+  /* Even line lengths instead of one short orphan line. */
+  text-wrap: balance;
+}
+
+.lede {
+  margin: 0;
+  color: var(--muted);
+  max-width: 56ch;
+}
+
+@media (max-width: 34rem) {
+  .masthead {
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+  }
+  .nav {
+    order: 3;
+    width: 100%;
+    margin-right: 0;
+  }
+  .account {
+    margin-left: auto;
+  }
+  .who {
+    max-width: 15ch;
+  }
+}
