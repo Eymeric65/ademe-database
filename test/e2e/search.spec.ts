@@ -47,7 +47,14 @@ test('one letter of difference excludes it', async ({ page }) => {
   await page.getByLabel('Surface (m²)').fill(TARGET.surface)
   await page.getByRole('button', { name: 'Rechercher' }).click()
 
-  await expect(page.getByText(/résultat|Aucun certificat/)).toBeVisible({ timeout: 60_000 })
+  // Wait on the results region rather than on its wording. Matching the copy
+  // coupled this to a sentence that later changed, and the fixture hid it: 400
+  // rows returned nothing, so the "Aucun certificat" branch always matched.
+  // Against the real 31,157-row partition the search returns hits and the
+  // wording is different, so the waiter timed out on a page that was correct.
+  await expect(
+    page.locator('.count').or(page.getByText('Aucun certificat')),
+  ).toBeVisible({ timeout: 60_000 })
   await expect(page.getByText(TARGET.address)).toHaveCount(0)
 })
 
