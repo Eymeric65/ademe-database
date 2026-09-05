@@ -35,12 +35,31 @@ from ademe.config import DEFAULT_DB, PAGE_SIZE
 from ademe.export_parquet import DPE_ROW_GROUP, SEARCH_COLUMNS, SEARCH_ROW_GROUP, SEARCH_SORT
 
 
-def read_manifest(root: Path | str) -> dict:
-    if str(root).startswith(("http://", "https://")):
-        import urllib.request
+def is_url(root: Path | str) -> bool:
+    return str(root).startswith(("http://", "https://"))
 
-        with urllib.request.urlopen(f"{root}/manifest.json") as fh:
-            return json.loads(fh.read())
+
+_client = None
+
+
+def _http():
+    """The project's own httpx client, not urllib.
+
+    TRAP: Cloudflare answers `Python-urllib/3.x` with 403. The published data
+    sits behind Cloudflare, so a plain urlopen of the manifest fails in the
+    weekly job with a Forbidden that has nothing to do with permissions --
+    `api.client()` sends a real User-Agent, and brings the retry and timeout
+    handling with it.
+    """
+    global _client
+    if _client is None:
+        _client = api.client()
+    return _client
+
+
+def read_manifest(root: Path | str) -> dict:
+    if is_url(root):
+        return json.loads(api._get(_http(), f"{root}/manifest.json").content)
     return json.loads((Path(root) / "manifest.json").read_text())
 
 
@@ -103,7 +122,7 @@ def _partitions(root: Path | str, kind: str) -> set[str]:
 
 
 def _url(root: Path | str, *parts: str) -> str:
-    if str(root).startswith(("http://", "https://")):
+    if is_url(root):
         return f"{root}/" + "/".join(parts)
     return str(Path(root).joinpath(*parts))
 
@@ -200,11 +219,8 @@ def merge(base: Path | str, delta_dir: Path, out: Path) -> list[str]:
 
 
 def _copy(src: str, dest: Path) -> None:
-    if src.startswith(("http://", "https://")):
-        import urllib.request
-
-        with urllib.request.urlopen(src) as fh, dest.open("wb") as out:
-            shutil.copyfileobj(fh, out)
+    if is_url(src):
+        dest.write_bytes(api._get(_http(), src).content)
     else:
         shutil.copyfile(src, dest)
 
