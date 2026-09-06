@@ -28,7 +28,13 @@ import {
   type Caller,
 } from './db'
 
-type Scope = 'public' | 'self' | 'owner'
+/**
+ * `signed-in` asks for a caller and filters on nothing, because the data it
+ * guards has no owner. That makes it WEAKER than `owner`, so it must never
+ * appear on an /api route -- test/unit/authorization.test.ts refuses that
+ * outright. See ADR-0012.
+ */
+type Scope = 'public' | 'signed-in' | 'self' | 'owner'
 
 export type Route = {
   method: string
@@ -148,6 +154,25 @@ export const ROUTES: Route[] = [
       return rows.length ? json(rows[0]) : json({ error: 'not found' }, 404)
     },
   },
+
+  // --- the data plane -----------------------------------------------------
+  // The engine, not the data: 77 MB of open-source WASM that has to load
+  // before the app can render anything, including the screen that asks
+  // somebody to sign in. Gating it would mean gating the sign-in screen.
+  {
+    method: 'ANY',
+    path: '/data/vendor/*',
+    scope: 'public',
+    handle: ({ request, env }) => serveObject(request, env, { immutable: true }),
+  },
+  // The certificates. Public data with no owner, and a session is still
+  // required to fetch a byte of it -- ADR-0012.
+  {
+    method: 'ANY',
+    path: '/data/v1/*',
+    scope: 'signed-in',
+    handle: ({ request, env }) => serveObject(request, env, { immutable: false }),
+  },
 ]
 
 /** Bodies are validated by hand; a schema library is not worth a dependency here. */
@@ -170,6 +195,120 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { 'content-type': 'application/json; charset=utf-8' },
   })
+}
+
+/**
+ * Stream one object out of the data bucket, preserving HTTP ranges.
+ *
+ * Range is load-bearing, not a nicety: DuckDB-WASM reads a Parquet footer and
+ * then only the row groups it needs (ADR-0006). A proxy that answered every
+ * request with the whole file would still work, and would download an entire
+ * partition per search.
+ */
+async function serveObject(
+  request: Request,
+  env: Env,
+  { immutable }: { immutable: boolean },
+): Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return json({ error: 'method not allowed' }, 405)
+  }
+
+  const key = decodeURIComponent(new URL(request.url).pathname.slice('/data/'.length))
+  // No key can climb out of the bucket, but a `..` in a path is worth refusing
+  // on sight rather than reasoning about R2's key semantics every time.
+  if (key === '' || key.includes('..')) return json({ error: 'not found' }, 404)
+
+  const headers = new Headers()
+  // DuckDB asks HEAD whether ranges are available before it asks for bytes; an
+  // answer without this makes it fall back to whole-file reads.
+  headers.set('accept-ranges', 'bytes')
+  // TRAP: `private`, never `public`, on anything gated. A public directive puts
+  // one caller's bytes in a shared edge cache, where the next request reads
+  // them without ever reaching the gate above.
+  headers.set(
+    'cache-control',
+    immutable ? 'public, max-age=31536000, immutable' : 'private, max-age=300',
+  )
+
+  if (request.method === 'HEAD') {
+    const meta = await env.DATA.head(key)
+    if (!meta) return json({ error: 'not found' }, 404)
+    meta.writeHttpMetadata(headers)
+    headers.set('etag', meta.httpEtag)
+    headers.set('content-length', String(meta.size))
+    return new Response(null, { status: 200, headers })
+  }
+
+  const asked = parseRange(request.headers.get('range'))
+  let object: R2Object | R2ObjectBody | null
+  try {
+    object = await env.DATA.get(key, {
+      ...(asked ? { range: asked } : {}),
+      // Only when the browser is revalidating. Passing the headers
+      // unconditionally would let an If-Match arrive and turn a plain read into
+      // a 412 nobody asked for.
+      ...(request.headers.has('if-none-match') ? { onlyIf: request.headers } : {}),
+    })
+  } catch {
+    // R2 refuses a range that starts past the end of the object.
+    return new Response(null, { status: 416, headers })
+  }
+  if (!object) return json({ error: 'not found' }, 404)
+
+  object.writeHttpMetadata(headers)
+  headers.set('etag', object.httpEtag)
+
+  // A precondition that failed comes back as an R2Object with no body.
+  if (!('body' in object) || object.body == null) {
+    return new Response(null, { status: 304, headers })
+  }
+
+  if (asked) {
+    const start = 'suffix' in asked ? Math.max(0, object.size - asked.suffix) : asked.offset
+    const length = Math.min(
+      'suffix' in asked ? asked.suffix : (asked.length ?? object.size - start),
+      object.size - start,
+    )
+    headers.set('content-range', `bytes ${start}-${start + length - 1}/${object.size}`)
+    headers.set('content-length', String(length))
+    return new Response(object.body, { status: 206, headers })
+  }
+  headers.set('content-length', String(object.size))
+  return new Response(object.body, { status: 200, headers })
+}
+
+/** What the client asked for, in R2's own shape but with nothing optional. */
+type Span = { offset: number; length?: number } | { suffix: number }
+
+/**
+ * `bytes=0-99` -> `{ offset: 0, length: 100 }`.
+ *
+ * TRAP: parsed here rather than handed to R2 as `range: request.headers`. That
+ * shortcut looks equivalent and is not -- the R2Range that comes back carries
+ * all three keys with the unused ones undefined, so `'suffix' in range` is true
+ * for an ordinary offset range and the Content-Range came out as
+ * `bytes NaN-30213/30214` while the whole file was served with status 206.
+ *
+ * A header this function does not understand (a multi-range, anything odd)
+ * returns null, and the caller answers 200 with the whole object. Slower, never
+ * wrong.
+ */
+function parseRange(header: string | null): Span | null {
+  if (!header) return null
+  const m = /^bytes=(\d*)-(\d*)$/.exec(header.trim())
+  if (!m) return null
+  const [, rawStart, rawEnd] = m as unknown as [string, string, string]
+  if (rawStart === '') {
+    const suffix = Number(rawEnd)
+    return Number.isFinite(suffix) && suffix > 0 ? { suffix } : null
+  }
+  const offset = Number(rawStart)
+  if (!Number.isFinite(offset)) return null
+  if (rawEnd === '') return { offset }
+  const end = Number(rawEnd)
+  if (!Number.isFinite(end) || end < offset) return null
+  return { offset, length: end - offset + 1 }
 }
 
 /** Matches `/api/buildings/:id` against a concrete path, returning its params. */
@@ -212,19 +351,21 @@ async function callerFor(request: Request, env: Env): Promise<Caller> {
   }
 }
 
+/**
+ * Prefixes the router owns. A path under one of these reaches the gate even
+ * when no route matches it, which is what keeps 401-before-404 true; anything
+ * else is a static asset.
+ *
+ * TRAP: this list is why the assets fallback sits BELOW the match loop. It used
+ * to be the first line of `fetch`, and moving /data/* behind the gate with that
+ * ordering left it served straight out of ASSETS -- gated in the route table
+ * and wide open in practice.
+ */
+const ROUTED_PREFIXES = ['/api/', '/data/']
+
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
-
-    // Anything that is not the API is the React build, served from the ASSETS
-    // binding without touching a database.
-    if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request)
-
-    // Before dispatch, not inside a handler: the Worker has no deploy-time
-    // hook that can reach D1, so the first request an isolate serves is what
-    // brings the schema up to date. Doing it in one handler only would leave
-    // every OTHER route to fail with "no such table" on a fresh database.
-    await ensureMigrated(env)
 
     let matched: { route: Route; params: Record<string, string> } | null = null
     for (const route of ROUTES) {
@@ -234,6 +375,18 @@ export default {
         break
       }
     }
+
+    // The React build, served from the ASSETS binding without touching a
+    // database. Only what the router does not own.
+    if (!matched && !ROUTED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+      return env.ASSETS.fetch(request)
+    }
+
+    // Before dispatch, not inside a handler: the Worker has no deploy-time
+    // hook that can reach D1, so the first request an isolate serves is what
+    // brings the schema up to date. Doing it in one handler only would leave
+    // every OTHER route to fail with "no such table" on a fresh database.
+    await ensureMigrated(env)
 
     const caller = await callerFor(request, env)
 

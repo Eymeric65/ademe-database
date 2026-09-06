@@ -3,6 +3,14 @@ interface Env {
   DB: D1Database
   ASSETS: Fetcher
 
+  /**
+   * The published certificates. Read-only: the Worker serves bytes out of this
+   * bucket and never writes to it -- the ETL uploads with an S3 token. The
+   * bucket has no public custom domain, which is what makes the gate on
+   * /data/v1/* the only way in. See ADR-0012.
+   */
+  DATA: R2Bucket
+
   BETTER_AUTH_SECRET: string
   BETTER_AUTH_URL: string
   GOOGLE_CLIENT_ID?: string

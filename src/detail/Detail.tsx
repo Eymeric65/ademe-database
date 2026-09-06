@@ -32,7 +32,7 @@ const GROUPS: Record<string, string> = {
 
 const ORDER = Object.keys(GROUPS)
 
-export function Detail({ numero, signedIn }: { numero: string; signedIn: boolean }) {
+export function Detail({ numero }: { numero: string }) {
   const [row, setRow] = useState<Record<string, unknown> | null | undefined>(undefined)
   const [meta, setMeta] = useState<Record<string, { destination: string }>>({})
   const [saved, setSaved] = useState<Saved | null>(null)
@@ -48,12 +48,11 @@ export function Detail({ numero, signedIn }: { numero: string; signedIn: boolean
   }, [numero])
 
   useEffect(() => {
-    if (!signedIn) return setSaved(null)
     void api
       .get<Saved[]>('/api/buildings')
       .then((rows) => setSaved(rows.find((r) => r.numeroDpe === numero) ?? null))
       .catch(() => setSaved(null))
-  }, [numero, signedIn])
+  }, [numero])
 
   if (row === undefined) return <p className="lede">Chargement du certificat…</p>
   if (row === null) return <p className="lede">Ce certificat est introuvable.</p>
@@ -91,13 +90,9 @@ export function Detail({ numero, signedIn }: { numero: string; signedIn: boolean
       <h1>{address}</h1>
       <p className="lede">{numero}</p>
 
-      {signedIn ? (
-        <button type="button" className="signin" onClick={() => void toggle()} disabled={busy}>
-          {saved ? 'Retirer' : 'Enregistrer'}
-        </button>
-      ) : (
-        <p className="hint">Connectez-vous pour garder ce certificat.</p>
-      )}
+      <button type="button" className="signin" onClick={() => void toggle()} disabled={busy}>
+        {saved ? 'Retirer' : 'Enregistrer'}
+      </button>
 
       {ordered.map(([group, entries]) => (
         <div key={group} className="group">
