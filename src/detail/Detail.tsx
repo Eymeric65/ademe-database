@@ -90,7 +90,9 @@ export function Detail({ numero }: { numero: string }) {
       <h1>{address}</h1>
       <p className="lede">{numero}</p>
 
-      <button type="button" className="signin" onClick={() => void toggle()} disabled={busy}>
+      {/* Vermilion, not the page's blue: a seal is what marks a document as
+          yours, which is exactly what this button does. */}
+      <button type="button" className="signin seal" onClick={() => void toggle()} disabled={busy}>
         {saved ? 'Retirer' : 'Enregistrer'}
       </button>
 

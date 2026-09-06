@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { useSession } from './auth'
 import { useRoute } from './routes'
 import { search, type Hit } from './data/duck'
@@ -63,18 +63,49 @@ function Gate({
   onSignIn: () => void
 }) {
   return (
-    <section>
-      <h1>{title}</h1>
-      <p className="lede">{lede}</p>
-      <p className="actions">
-        <button type="button" className="signin" onClick={onSignIn}>
-          {cta}
-        </button>
-      </p>
-      <p className="hint">Un compte Google suffit. Rien d’autre ne vous est demandé.</p>
+    <section className="gate">
+      <div>
+        <h1>{title}</h1>
+        <p className="lede">{lede}</p>
+        <p className="actions">
+          <button type="button" className="signin" onClick={onSignIn}>
+            {cta}
+          </button>
+        </p>
+        <p className="hint">Un compte Google suffit. Rien d’autre ne vous est demandé.</p>
+      </div>
+      <Ladder />
     </section>
   )
 }
+
+/**
+ * The label itself, as the hero.
+ *
+ * Seven bands in the arrêté's own colours, each pointing right and widening
+ * toward G -- the shape printed on every French listing. The product is about
+ * this artifact, so it is the artifact a visitor should meet first. Decorative
+ * only in the sense that it carries no data: aria-hidden, and the sentence
+ * beside it says everything.
+ */
+function Ladder() {
+  return (
+    <ul className="ladder" aria-hidden="true">
+      {LETTERS.map((letter, i) => (
+        <li
+          key={letter}
+          className="rung"
+          data-letter={letter}
+          style={{ '--w': `${40 + i * 9}%` } as CSSProperties}
+        >
+          {letter}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
 
 /**
  * The energy label is this product's whole subject, so it is also its mark.
@@ -124,8 +155,12 @@ export default function App() {
               </button>
             </>
           ) : (
+            /* "Se connecter", not "Se connecter avec Google": the masthead is
+               a persistent affordance and the gate below it already explains
+               the method. It also has to survive a 390 px header without
+               pushing the navigation onto a third row. */
             <button type="button" className="signin" onClick={() => void signInWithGoogle()}>
-              Se connecter avec Google
+              Se connecter
             </button>
           )}
         </div>
