@@ -1,14 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-09-05
 area: frontend
 supersedes:
-superseded-by:
+superseded-by: 0012
 ---
 
 # ADR-0009 — DuckDB-WASM in the browser, reading Parquet from the data domain
 
-**Status:** accepted · **Decided:** 2026-09-05 · **Area:** frontend
+**Status:** superseded by [ADR-0012](0012-the-data-plane-is-served-through-the-worker.md) ·
+**Decided:** 2026-09-05 · **Area:** frontend
 
 ## Context and Problem Statement
 

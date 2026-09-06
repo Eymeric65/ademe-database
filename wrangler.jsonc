@@ -20,6 +20,12 @@
     }
   ],
 
+  // The published certificates, served through the Worker so the gate in
+  // server/index.ts applies to them. The bucket has NO public custom domain --
+  // one would bypass the gate entirely. Read-only here; the ETL uploads with an
+  // S3 token. See ADR-0012.
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "ademe-dpe" }],
+
   "observability": { "enabled": true },
 
   // The production hostname. Configured here so a `wrangler deploy` from main
@@ -66,7 +72,13 @@
           "database_id": "cfde5faa-4b2e-4707-918a-63d370238ee4",
           "migrations_dir": "db/migrations"
         }
-      ]
+      ],
+
+      // The same bucket as production, deliberately: it is public read-only
+      // data and the Worker never writes to it, so a second copy would be 77 MB
+      // of engine and a full département to keep in sync for no gain. `vars`
+      // and bindings are not inherited, hence the repetition.
+      "r2_buckets": [{ "binding": "DATA", "bucket_name": "ademe-dpe" }]
     }
   }
 }

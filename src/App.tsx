@@ -45,6 +45,38 @@ function Search() {
 }
 
 /**
+ * The signed-out screen for every route that reads the data plane.
+ *
+ * This is the half a person sees. The half that holds is the route gate in
+ * server/index.ts, which refuses the bytes themselves -- see ADR-0012. Keeping
+ * the two apart matters: hiding a form is a prompt, not a control.
+ */
+function Gate({
+  title,
+  lede,
+  cta,
+  onSignIn,
+}: {
+  title: string
+  lede: string
+  cta: string
+  onSignIn: () => void
+}) {
+  return (
+    <section>
+      <h1>{title}</h1>
+      <p className="lede">{lede}</p>
+      <p className="actions">
+        <button type="button" className="signin" onClick={onSignIn}>
+          {cta}
+        </button>
+      </p>
+      <p className="hint">Un compte Google suffit. Rien d’autre ne vous est demandé.</p>
+    </section>
+  )
+}
+
+/**
  * The energy label is this product's whole subject, so it is also its mark.
  * The badge carries the official DPE colour for its letter -- the same ramp
  * every French listing prints -- which is why the palette is not decorative.
@@ -100,12 +132,31 @@ export default function App() {
       </header>
 
       <main>
-        {route.name === 'saved' ? (
+        {/* Nothing until /api/me has answered, for the same reason the header
+            waits: rendering the gate first would show "connectez-vous" to
+            somebody who already is, on every load. */}
+        {loading ? null : route.name === 'saved' ? (
           <Saved signedIn={Boolean(account)} />
         ) : route.name === 'detail' ? (
-          <Detail numero={route.numero} signedIn={Boolean(account)} />
-        ) : (
+          account ? (
+            <Detail numero={route.numero} />
+          ) : (
+            <Gate
+              title="Ce certificat DPE demande un compte"
+              lede="Le diagnostic est public. Connectez-vous pour lire ses 226 données et le garder dans vos certificats."
+              cta="Se connecter et consulter"
+              onSignIn={() => void signInWithGoogle()}
+            />
+          )
+        ) : account ? (
           <Search />
+        ) : (
+          <Gate
+            title="Retrouvez un logement à partir de son DPE"
+            lede="Une annonce publie la classe énergie, la surface et la commune, mais pas l’adresse. Le diagnostic, lui, est public. Connectez-vous pour l’interroger."
+            cta="Se connecter et chercher"
+            onSignIn={() => void signInWithGoogle()}
+          />
         )}
       </main>
     </>

@@ -50,11 +50,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      # 77 MB of engine, copied from node_modules rather than committed. The
-      # fixture server serves it the way R2 will. See ADR-0009.
-      - run: npm run stage:duckdb
-      # Runs against `wrangler dev` -- built assets and the API on one origin,
-      # the same shape as production. See playwright.config.ts.
+      # `pretest:e2e` copies the 77 MB engine out of node_modules and seeds it,
+      # with the Parquet fixtures, into the LOCAL R2 bucket the Worker reads.
+      # Runs against `wrangler dev` -- assets, API and data on one origin, the
+      # same shape as production. See playwright.config.ts and ADR-0012.
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: failure()

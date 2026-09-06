@@ -22,8 +22,19 @@ import { describe, expect, it } from 'vitest'
 
 const ROUTER = resolve(import.meta.dirname, '../../server/index.ts')
 
-/** Reachable without a session. Sign-in cannot require being signed in. */
-const PUBLIC = ['/api/health', '/api/auth/*']
+/**
+ * Reachable without a session. Sign-in cannot require being signed in, and the
+ * DuckDB engine has to load before the app can tell anybody to sign in.
+ */
+const PUBLIC = ['/api/health', '/api/auth/*', '/data/vendor/*']
+
+/**
+ * Needs a caller and reads data that has no owner -- the public certificates.
+ * There are no rows to cross tenants over, which is exactly why this is its own
+ * scope rather than a second name in SELF_SCOPED: `self` and `owner` both mean
+ * "belongs to somebody", and this does not. See ADR-0012.
+ */
+const SIGNED_IN = ['/data/v1/*']
 
 /**
  * Reads the caller's own identity and nothing owned. Every addition here needs
@@ -74,7 +85,7 @@ describe('the router', () => {
 
   it('gives every route a known scope', () => {
     for (const r of routes) {
-      expect(['public', 'self', 'owner'], r.path).toContain(r.scope)
+      expect(['public', 'signed-in', 'self', 'owner'], r.path).toContain(r.scope)
     }
   })
 
@@ -90,10 +101,25 @@ describe('the router', () => {
     )
   })
 
+  it('exposes exactly the signed-in routes on the allowlist', () => {
+    expect(routes.filter((r) => r.scope === 'signed-in').map((r) => r.path).sort()).toEqual(
+      [...SIGNED_IN].sort(),
+    )
+  })
+
   it('leaves everything else owner-scoped', () => {
-    const named = new Set([...PUBLIC, ...SELF_SCOPED])
+    const named = new Set([...PUBLIC, ...SELF_SCOPED, ...SIGNED_IN])
     for (const r of routes) {
       if (!named.has(r.path)) expect(r.scope, r.path).toBe('owner')
+    }
+  })
+
+  it('never lets an /api route take the signed-in scope', () => {
+    // `signed-in` is weaker than `owner`: it asks for a caller and then filters
+    // on nothing. On a route that returns rows, that is every row. The scope
+    // exists for data with no owner, and /api/* has an owner for everything.
+    for (const r of routes) {
+      if (r.path.startsWith('/api/')) expect(r.scope, r.path).not.toBe('signed-in')
     }
   })
 })

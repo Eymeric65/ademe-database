@@ -5,8 +5,9 @@ wrong even if it works.
 
 This project is two applications that share a repository and nothing else:
 
-- **The data plane** — public ADEME DPE data, published as Parquet on R2 and read directly by the
-  browser. No owner, no auth, no authorization. Built by the Python ETL in `ademe/`.
+- **The data plane** — public ADEME DPE data, published as Parquet on R2 and read by the browser
+  through the Worker's `/data/*` route, which requires a session but scopes nothing: no row has an
+  owner. Built by the Python ETL in `ademe/`. See ADR-0012.
 - **The app plane** — a Cloudflare Worker with D1 holding accounts, saved buildings and saved
   searches. Everything here has an owner and every read must be scoped to it.
 
@@ -174,7 +175,8 @@ compared against live ADEME records. That test is the definition of "lossless" h
 | `npm run check` | tsc, vitest, test:db, db:check |
 | `npm run test:db` | vitest against real Miniflare D1 (`test/db/`) |
 | `npm run test:e2e` | Playwright, chromium |
-| `npm run stage:duckdb` | copy DuckDB-WASM out of node_modules for the e2e fixture server |
+| `npm run stage:duckdb` | copy DuckDB-WASM out of node_modules into the e2e fixtures |
+| `npm run seed:r2` | load the e2e fixtures into the local R2 bucket `wrangler dev` reads |
 | `npm run db:generate` | Drizzle generate + bundle migrations |
 | `npm run db:check` | regenerate and fail on a dirty diff |
 | `npm run preview` | upload a version, print the preview URL |

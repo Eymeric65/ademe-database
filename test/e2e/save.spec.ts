@@ -18,6 +18,7 @@ const TARGET = {
 }
 
 async function findTarget(page: import('@playwright/test').Page) {
+  // Signed in first: since ADR-0012 there is no search form without a session.
   await page.goto('/')
   await page.getByLabel('Code postal').fill(TARGET.codePostal)
   await page.getByLabel('Classe énergie').selectOption(TARGET.classe)
@@ -27,6 +28,7 @@ async function findTarget(page: import('@playwright/test').Page) {
 }
 
 test('the detail view shows a column only the wide file has', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail'))
   await findTarget(page)
   await page.getByRole('link', { name: TARGET.address }).click()
 
