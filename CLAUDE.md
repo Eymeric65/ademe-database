@@ -5,8 +5,9 @@ wrong even if it works.
 
 This project is two applications that share a repository and nothing else:
 
-- **The data plane** — public ADEME DPE data, published as Parquet on R2 and read directly by the
-  browser. No owner, no auth, no authorization. Built by the Python ETL in `ademe/`.
+- **The data plane** — public ADEME DPE data, published as Parquet on R2 and read by the browser
+  through the Worker's `/data/*` route, which requires a session but scopes nothing: no row has an
+  owner. Built by the Python ETL in `ademe/`. See ADR-0012.
 - **The app plane** — a Cloudflare Worker with D1 holding accounts, saved buildings and saved
   searches. Everything here has an owner and every read must be scoped to it.
 
@@ -60,7 +61,7 @@ would assert the fake. Do not introduce one.
 ## 4. Run the checks before pushing
 
 ```bash
-npm run check          # tsc --noEmit, vitest, db:check
+npm run check          # tsc --noEmit, vitest, test:db, db:check
 uv run pytest -m "not live"
 ```
 
@@ -171,15 +172,20 @@ compared against live ADEME records. That test is the definition of "lossless" h
 | | |
 |---|---|
 | `npm run dev` | Vite + `wrangler dev` with local D1 |
-| `npm run check` | tsc, vitest, db:check |
+| `npm run check` | tsc, vitest, test:db, db:check |
+| `npm run test:db` | vitest against real Miniflare D1 (`test/db/`) |
 | `npm run test:e2e` | Playwright, chromium |
+| `npm run stage:duckdb` | copy DuckDB-WASM out of node_modules into the e2e fixtures |
+| `npm run seed:r2` | load the e2e fixtures into the local R2 bucket `wrangler dev` reads |
 | `npm run db:generate` | Drizzle generate + bundle migrations |
 | `npm run db:check` | regenerate and fail on a dirty diff |
 | `npm run preview` | upload a version, print the preview URL |
 | `uv run pytest -m "not live"` | ETL tests, offline |
 | `uv run pytest -m live` | ETL tests against the live ADEME API |
 | `uv run python -m ademe.ingest --dept 09` | load one département into the local SQLite build |
-| `uv run python -m ademe.export_parquet` | SQLite → partitioned Parquet |
+| `uv run python -m ademe.export_parquet --out DIR` | SQLite → partitioned Parquet |
+| `uv run python -m ademe.delta --base-url URL --out DIR` | fetch what changed and merge it in |
+| `uv run python scripts/reconcile.py --root DIR/v1` | check every partition against ADEME |
 
 ## Layout
 

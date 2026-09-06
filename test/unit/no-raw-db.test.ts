@@ -16,6 +16,17 @@ const ROOT = resolve(import.meta.dirname, '../..')
 /** The one module allowed to open a database. */
 const CHOKE_POINT = 'server/db.ts'
 
+/**
+ * D1 tests are allowed a handle, and only D1 tests.
+ *
+ * They run against real Miniflare D1 because there is no mock database here
+ * (CLAUDE.md section 3), and a test that cannot touch the database cannot prove
+ * the schema actually landed -- which is the one thing test/db/migrate.test.ts
+ * exists to prove. The exemption is a path prefix, not a per-file opt-out, so
+ * it cannot spread to a route handler by somebody adding a comment.
+ */
+const ALLOWED_PREFIX = 'test/db/'
+
 /** Ways to get a handle. Adding a way to reach D1 means adding it here. */
 const PATTERNS = [
   { name: 'drizzle(', re: /\bdrizzle\s*\(/ },
@@ -28,7 +39,7 @@ export type SourceFile = { path: string; text: string }
 export function findRawDbUses(files: SourceFile[]): string[] {
   const found: string[] = []
   for (const f of files) {
-    if (f.path === CHOKE_POINT) continue
+    if (f.path === CHOKE_POINT || f.path.startsWith(ALLOWED_PREFIX)) continue
     for (const p of PATTERNS) {
       if (p.re.test(f.text)) found.push(`${f.path}: ${p.name}`)
     }
@@ -60,6 +71,15 @@ describe('the detector itself', () => {
     expect(
       findRawDbUses([{ path: CHOKE_POINT, text: 'return drizzle(env.DB, { schema: s })' }]),
     ).toEqual([])
+  })
+
+  it('allows a D1 test to open one, and only under test/db/', () => {
+    expect(
+      findRawDbUses([{ path: 'test/db/migrate.test.ts', text: 'await migrate(env.DB)' }]),
+    ).toEqual([])
+    expect(
+      findRawDbUses([{ path: 'test/unit/sneaky.test.ts', text: 'await migrate(env.DB)' }]),
+    ).toHaveLength(1)
   })
 
   it('does not flag ordinary code', () => {
