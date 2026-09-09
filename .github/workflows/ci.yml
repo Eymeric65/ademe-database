@@ -20,6 +20,15 @@ jobs:
         with:
           node-version: '22'
           cache: npm
+      # TRAP: Node 22 ships npm 10, and npm 10 and 11 disagree about this tree.
+      # `@cloudflare/vitest-pool-workers` pins a nested `wrangler@4` whose
+      # `@cloudflare/workers-types@^4` is an OPTIONAL PEER dependency: npm 11
+      # prunes it from the lock, npm 10 refuses `npm ci` without it. Writing the
+      # lock with npm 10 does not settle it -- the next `npm install` on a
+      # developer's npm 11 deletes the entry again and CI goes red with nothing
+      # in the diff to explain why. Pinning the runner to the npm the repository
+      # is developed with is what keeps the lock a single, stable artefact.
+      - run: npm install -g npm@11
       - run: npm ci
       - run: npm run check
 
