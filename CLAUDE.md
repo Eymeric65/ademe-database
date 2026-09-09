@@ -60,7 +60,7 @@ would assert the fake. Do not introduce one.
 ## 4. Run the checks before pushing
 
 ```bash
-npm run check          # tsc --noEmit, vitest, db:check
+npm run check          # tsc --noEmit, vitest, test:db, db:check
 uv run pytest -m "not live"
 ```
 
@@ -171,7 +171,8 @@ compared against live ADEME records. That test is the definition of "lossless" h
 | | |
 |---|---|
 | `npm run dev` | Vite + `wrangler dev` with local D1 |
-| `npm run check` | tsc, vitest, db:check |
+| `npm run check` | tsc, vitest, test:db, db:check |
+| `npm run test:db` | vitest against real Miniflare D1 (`test/db/`) |
 | `npm run test:e2e` | Playwright, chromium |
 | `npm run db:generate` | Drizzle generate + bundle migrations |
 | `npm run db:check` | regenerate and fail on a dirty diff |

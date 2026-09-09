@@ -21,6 +21,7 @@
 
 import { and, desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
+import { migrate } from '../db/migrate'
 import * as s from '../db/schema'
 
 export type Caller = { sub: string }
@@ -139,4 +140,21 @@ export async function deleteSavedSearch(
     .delete(s.savedSearch)
     .where(and(eq(s.savedSearch.id, id), eq(s.savedSearch.userId, caller.sub)))
     .returning()
+}
+
+// --- migrations ------------------------------------------------------------
+
+/**
+ * Runs pending migrations once per isolate.
+ *
+ * The Worker has no deploy-time hook that can reach D1, so the schema is
+ * brought up to date on the first request an isolate serves. The promise is
+ * memoised rather than the result: without that, concurrent first requests each
+ * start their own run and race on the same CREATE TABLE.
+ */
+let migrated: Promise<string[]> | null = null
+
+export function ensureMigrated(env: { DB: D1Database }): Promise<string[]> {
+  migrated ??= migrate(env.DB)
+  return migrated
 }

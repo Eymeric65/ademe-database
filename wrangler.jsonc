@@ -15,7 +15,7 @@
     {
       "binding": "DB",
       "database_name": "ademe-app",
-      "database_id": "PLACEHOLDER_SET_BY_WRANGLER_D1_CREATE",
+      "database_id": "227e47fd-e464-41b0-82ce-9f3ee64d9916",
       "migrations_dir": "db/migrations"
     }
   ],
@@ -30,7 +30,7 @@
         {
           "binding": "DB",
           "database_name": "ademe-app-preview",
-          "database_id": "PLACEHOLDER_SET_BY_WRANGLER_D1_CREATE",
+          "database_id": "cfde5faa-4b2e-4707-918a-63d370238ee4",
           "migrations_dir": "db/migrations"
         }
       ]

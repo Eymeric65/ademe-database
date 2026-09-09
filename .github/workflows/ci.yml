@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [dev]
+
+# A superseded push has nothing to say. `main` is never built here: it is only
+# ever reached through a PR from dev, which was already green.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  etl:
+    runs-on: ubuntu-latest
+    env:
+      # TRAP: with CI set, a missing dependency is a hard failure rather than a
+      # skip. A green run that silently tested nothing is worse than a red one,
+      # because it looks like evidence (CLAUDE.md section 3).
+      CI: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run pytest -m "not live"
