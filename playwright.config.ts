@@ -19,7 +19,20 @@ const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:8787'
 
 export default defineConfig({
   testDir: './test/e2e',
+  // TRAP: the DuckDB assertions below ask for 60s, which the 30s default test
+  // timeout silently cuts off -- the per-expect budget cannot exceed the test's.
+  // Warm, the engine loads in seconds and nothing shows; cold, the first run
+  // pulls 77 MB of wasm through the Worker's R2 binding and every search test
+  // dies at 30s. CI is always cold.
+  timeout: 90_000,
   fullyParallel: true,
+  // TRAP: one `wrangler dev` serves the 77 MB DuckDB engine to every browser
+  // context. Concurrently, its proxy drops connections mid-range with "Network
+  // connection lost." and the failure is not confined to the search tests --
+  // the smoke test goes down with them. Two workers only widened the window:
+  // it failed 1 cold run in 3. One is the number that holds, and it costs
+  // about ten seconds because the run was never CPU-bound.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['html'], ['list']] : 'list',
