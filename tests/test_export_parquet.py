@@ -8,7 +8,9 @@ a vocabulary join can quietly drop a value.
 
 from __future__ import annotations
 
+import os
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -151,6 +153,112 @@ def exported(tmp_path, monkeypatch):
     manifest = export_parquet.export(path, out)
     yield conn, out / export_parquet.VERSION, manifest, (column, violating), path
     conn.close()
+
+
+def _peak_growth_mb(export) -> float:
+    """How far the process's peak RSS rose while `export()` ran, in MB.
+
+    Writing 5 to /proc/self/clear_refs resets the peak (VmHWM), so the number
+    is this export's alone -- ru_maxrss cannot be reset, and carries whatever
+    the process peaked at before."""
+    def kb(field: str) -> int:
+        for line in Path("/proc/self/status").read_text().splitlines():
+            if line.startswith(field + ":"):
+                return int(line.split()[1])
+        raise AssertionError(f"no {field} in /proc/self/status")
+
+    Path("/proc/self/clear_refs").write_text("5")
+    base = kb("VmRSS")
+    export()
+    return (kb("VmHWM") - base) / 1024
+
+
+def test_a_partitions_export_memory_does_not_grow_with_rows_outside_it(tmp_path, monkeypatch):
+    """The national export ran out of memory (24.5 GiB) on its first partition.
+
+    Each partition's query joined whole tables -- every repeating-group slot
+    hashing a 15-27M-row national table -- and DuckDB's SQLite scanner does not
+    push a filter down, so the partition's WHERE came too late. Here the same
+    one-certificate partition is exported twice: before and after three million
+    rows of OTHER certificates are added to the tables it joins. Its memory
+    must not notice. Measured before the fix: +353 MB. After: +1 MB. ADR-0028.
+
+    A relative bound, not an absolute one: the wide query's ~150 joins cost a
+    fixed ~140 MB whatever the data, and that baseline is DuckDB's to change.
+    """
+    if not Path("/proc/self/clear_refs").exists():
+        if os.environ.get("CI"):
+            raise AssertionError("peak-RSS reset needs Linux /proc; CI is Linux")
+        pytest.skip("peak-RSS reset needs Linux /proc")
+
+    path = tmp_path / "t.sqlite"
+    schema.build(path, scales=SCALES)
+    conn = db.connect(path, bulk=True)
+    loader = ingest.Loader(conn, spec.load(SCALES))
+    loader.load_page([_row("2409E0000001", "09001", "09"), _row("2497E0000001", "97701", "977")])
+    conn.commit()
+
+    # One thread: with the default, DuckDB's own allocation varies by ~100 MB
+    # between identical runs.
+    real = duckdb.connect
+
+    def one_thread(*args, **kwargs):
+        c = real(*args, **kwargs)
+        c.execute("SET threads = 1")
+        return c
+
+    monkeypatch.setattr(export_parquet.duckdb, "connect", one_thread)
+    out = tmp_path / "out"
+    alone = _peak_growth_mb(lambda: export_parquet.export(path, out, ["977"]))
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    tables = [
+        r[0]
+        for r in conn.execute(
+            "SELECT m.name FROM sqlite_master m WHERE m.type = 'table' AND m.name != 'dpe'"
+            " AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) p WHERE p.name = 'dpe_id')"
+        )
+    ]
+    inflated = 0
+    for table in tables:
+        rest = ", ".join(
+            f'"{r[1]}"' for r in conn.execute(f"PRAGMA table_info({table})") if r[1] != "dpe_id"
+        )
+        conn.execute(
+            "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 3000000)"
+            f" INSERT INTO {table} (dpe_id, {rest})"
+            f" SELECT 1000000 + s.i, {rest} FROM (SELECT * FROM {table} LIMIT 1), s"
+        )
+        inflated += conn.execute(f"SELECT count(*) FROM {table} WHERE dpe_id > 1000000").fetchone()[0]
+    conn.commit()
+    conn.close()
+    assert inflated >= 3_000_000, "the fixture has to inflate at least one joined table"
+
+    manifest = None
+
+    def again():
+        nonlocal manifest
+        manifest = export_parquet.export(path, out, ["977"])
+
+    crowded = _peak_growth_mb(again)
+    monkeypatch.undo()
+
+    assert crowded - alone < 100, (
+        f"exporting one certificate took {crowded:.0f} MB beside 3M other rows,"
+        f" {alone:.0f} MB alone: the partition's joins are reading the whole tables"
+    )
+    assert [p["rows"] for p in manifest["partitions"]] == [1]
+    row = (
+        duckdb.connect()
+        .execute(
+            "SELECT numero_dpe, type_energie_n1, type_energie_n3 FROM read_parquet(?,"
+            " hive_partitioning = false)",
+            [str(out / export_parquet.VERSION / "dpe" / "dept=DOM" / "part-0000.parquet")],
+        )
+        .fetchall()
+    )
+    # The narrowed joins still reach the partition's own repeating-group rows.
+    assert row == [("2497E0000001", "Electricite", "Bois")]
 
 
 def test_every_column_of_every_row_survives_the_export(exported):
