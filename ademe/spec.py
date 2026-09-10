@@ -128,6 +128,12 @@ def _encoding(f: dict, scales: dict[str, int], source: Source) -> tuple[str, str
     key, typ, fmt = f["key"], f.get("type"), f.get("format")
     card = f.get("x-cardinality")
 
+    # TRAP: the record key is stored raw in dpe's own NOT NULL column
+    # (ddl.dpe_ddl), whatever its cardinality. Below the dictionary threshold --
+    # new housing's 1.42M certificates -- it would otherwise be recorded as a
+    # vocabulary column that does not exist. See ADR-0025.
+    if key == "numero_dpe":
+        return TEXT, None, 1
     if fmt == "date":
         return DATE, None, 1
     if typ in ("number", "integer"):

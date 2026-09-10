@@ -13,10 +13,19 @@ from ademe.config import EXISTANT, Source
 from ademe.mapping import check_coverage
 
 
+_TABLE_KEYS = {"dpe_id", "adresse_id", "commune_id"}
+
+
 def _col_sql(c: spec.Column, name: str | None = None) -> tuple[str, str]:
     """(column_name, sql fragment) for one source column."""
     if c.encoding in (spec.VOCAB_CLOSED, spec.VOCAB_OPEN):
         n = (name or c.key) + "_id"
+        # TRAP: encodings follow each dataset's cardinality, so a column that
+        # is text in one source is a vocabulary in another -- and new housing's
+        # `adresse_ban`, landing in `adresse` as `adresse`, would take the
+        # table's own primary key. See ADR-0025.
+        if n in _TABLE_KEYS:
+            n = (name or c.key) + "_vocab_id"
         return n, f'"{n}" INTEGER REFERENCES vocab_{c.domain}(id)'
     n = name or c.key
     return n, f'"{n}" {c.sql_type}'
