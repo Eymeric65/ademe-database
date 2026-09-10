@@ -43,7 +43,15 @@ EXISTANT = Source(
     subdir="",
     mapping=_mapping.EXISTANT,
 )
-SOURCES = {s.slug: s for s in (EXISTANT,)}
+NEUF = Source(
+    slug="neuf",
+    dataset="dpe02neuf",
+    schema_json=REPO / "schema" / "dpe02neuf-schema.json",
+    db_path=DEFAULT_DB.with_name("ademe-neuf.sqlite"),
+    subdir="neuf",
+    mapping=_mapping.NEUF,
+)
+SOURCES = {s.slug: s for s in (EXISTANT, NEUF)}
 
 # Existing housing, under the names every module used before there was a second.
 SCHEMA_JSON = EXISTANT.schema_json

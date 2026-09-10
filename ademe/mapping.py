@@ -267,6 +267,36 @@ EXISTANT = Mapping(
     adresse_brut=ADRESSE_BRUT_COLUMNS,
 )
 
+# New housing lacks 20 of existing housing's columns: eight top-level, twelve
+# whole columns of repeating groups. Listed rather than derived from the two
+# schemas, so a column ADEME drops later still fails `classify` instead of
+# quietly shrinking this. See ADR-0025.
+NEUF_ABSENT = frozenset(
+    {
+        "apport_interne_saison_chauffe",
+        "apport_interne_saison_froide",
+        "apport_solaire_saison_chauffe",
+        "apport_solaire_saison_froide",
+        "date_installation_generateur_n1_ecs_n1",
+        "date_installation_generateur_n2_ecs_n1",
+        "description_generateur_chauffage_n1_installation_n1",
+        "description_generateur_chauffage_n1_installation_n2",
+        "description_generateur_chauffage_n2_installation_n1",
+        "description_generateur_chauffage_n2_installation_n2",
+        "facteur_couverture_solaire_installation_chauffage_n1",
+        "facteur_couverture_solaire_installation_chauffage_n2",
+        "facteur_couverture_solaire_n1",
+        "facteur_couverture_solaire_saisi_installation_chauffage_n1",
+        "facteur_couverture_solaire_saisi_installation_chauffage_n2",
+        "facteur_couverture_solaire_saisi_n1",
+        "periode_installation_generateur_froid",
+        "qualite_isolation_plancher_haut_comble_perdu",
+        "qualite_isolation_plancher_haut_toit_terrasse",
+        "type_energie_climatisation",
+    }
+)
+NEUF = EXISTANT.without(NEUF_ABSENT)
+
 
 def classify(source_columns: list[str], mapping: Mapping = EXISTANT) -> Coverage:
     """Assign every source column to exactly one destination."""
