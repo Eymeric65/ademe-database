@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from ademe import api, delta, export_parquet
+from ademe.config import EXISTANT, SOURCES
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -24,11 +25,15 @@ def main(argv: list[str] | None = None) -> int:
     # "https:/x/v1" and read_manifest then looks for a local file of that name.
     # The published root is normally a URL, so this argument is a string and
     # read_manifest branches on the scheme.
-    ap.add_argument("--root", required=True, help="the published v1/ directory or URL")
+    ap.add_argument(
+        "--root", required=True, help="the source's published tree (v1/ or v1/<subdir>), dir or URL"
+    )
     ap.add_argument("--out", type=Path, help="where to write the corrected files")
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
     args = ap.parse_args(argv)
+    source = SOURCES[args.source]
 
-    report = delta.reconcile(api.client(), args.root, quiet=False)
+    report = delta.reconcile(api.client(), args.root, quiet=False, source=source)
     divergent = {d: r for d, r in report.items() if not r.clean()}
     if not divergent:
         print("every partition agrees with ADEME")
@@ -42,7 +47,9 @@ def main(argv: list[str] | None = None) -> int:
         print("::error::divergence found and no --out given", file=sys.stderr)
         return 1
 
-    rewritten = delta.apply_deletions(args.root, report, args.out / export_parquet.VERSION)
+    rewritten = delta.apply_deletions(
+        args.root, report, args.out / export_parquet.VERSION / source.subdir, source=source
+    )
     print(f"rewrote {len(rewritten)} partition(s): {', '.join(rewritten)}")
 
     if appeared:

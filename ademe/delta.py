@@ -31,8 +31,8 @@ from pathlib import Path
 import duckdb
 
 from ademe import api, db, export_parquet, ingest, schema, spec
-from ademe.config import DEFAULT_DB, PAGE_SIZE
-from ademe.export_parquet import DPE_ROW_GROUP, SEARCH_COLUMNS, SEARCH_ROW_GROUP, SEARCH_SORT
+from ademe.config import DEFAULT_DB, EXISTANT, PAGE_SIZE, SOURCES, Source
+from ademe.export_parquet import DPE_ROW_GROUP, SEARCH_ROW_GROUP
 
 
 def is_url(root: Path | str) -> bool:
@@ -81,19 +81,26 @@ def scales_from(manifest: dict) -> dict[str, int]:
 
 
 def fetch_delta(
-    client, since: str, db_path: Path, manifest: dict, *, page_size: int = PAGE_SIZE, quiet=True
+    client,
+    since: str,
+    db_path: Path,
+    manifest: dict,
+    *,
+    page_size: int = PAGE_SIZE,
+    quiet=True,
+    source: Source = EXISTANT,
 ) -> int:
     """Load every certificate modified on or after `since` into a fresh SQLite."""
     scales = scales_from(manifest)
-    schema.build(db_path, scales=scales)
+    schema.build(db_path, scales=scales, source=source)
     conn = db.connect(db_path, bulk=True)
     try:
-        loader = ingest.Loader(conn, spec.load(scales))
+        loader = ingest.Loader(conn, spec.load(scales, source=source), source=source)
         loaded = 0
         # Inclusive lower bound: the mark is a DATE, so a strict bound would
         # drop everything else modified on the same day as the last run.
         qs = f"date_derniere_modification_dpe:[{since} TO *]"
-        for page in api.iter_pages(client, qs=qs, page_size=page_size):
+        for page in api.iter_pages(client, qs=qs, page_size=page_size, source=source):
             with db.transaction(conn):
                 loaded += loader.load_page(page.rows)
             if not quiet:
@@ -127,7 +134,15 @@ def _url(root: Path | str, *parts: str) -> str:
     return str(Path(root).joinpath(*parts))
 
 
-def merge_partition(duck, base: Path | str, delta_dir: Path, dept: str, out: Path) -> int:
+def _search(source: Source) -> tuple[str, str]:
+    """The source's search columns and sort, as SQL lists. ADR-0018."""
+    columns, order = export_parquet.SEARCH[source.slug]
+    return ", ".join(f'"{c}"' for c in columns), ", ".join(f'"{c}"' for c in order)
+
+
+def merge_partition(
+    duck, base: Path | str, delta_dir: Path, dept: str, out: Path, source: Source = EXISTANT
+) -> int:
     """Rewrite one partition as (base minus the delta's ids) plus the delta.
 
     Anti-join on numero_dpe, never a plain UNION: a certificate that was
@@ -137,8 +152,7 @@ def merge_partition(duck, base: Path | str, delta_dir: Path, dept: str, out: Pat
     """
     for kind, row_group, columns, order in (
         ("dpe", DPE_ROW_GROUP, "*", "numero_dpe"),
-        ("search", SEARCH_ROW_GROUP, ", ".join(f'"{c}"' for c in SEARCH_COLUMNS),
-         ", ".join(f'"{c}"' for c in SEARCH_SORT)),
+        ("search", SEARCH_ROW_GROUP, *_search(source)),
     ):
         base_file = _url(base, kind, f"dept={dept}", "part-0000.parquet")
         delta_file = delta_dir / kind / f"dept={dept}" / "part-0000.parquet"
@@ -165,7 +179,9 @@ def merge_partition(duck, base: Path | str, delta_dir: Path, dept: str, out: Pat
     ).fetchone()[0]
 
 
-def merge(base: Path | str, delta_dir: Path, out: Path) -> list[str]:
+def merge(
+    base: Path | str, delta_dir: Path, out: Path, source: Source = EXISTANT
+) -> list[str]:
     """Merge every partition the delta touched. Returns the ones rewritten.
 
     Partitions the delta never mentioned are COPIED, not rebuilt. Rewriting
@@ -185,7 +201,7 @@ def merge(base: Path | str, delta_dir: Path, out: Path) -> list[str]:
     for part in base_manifest["partitions"]:
         dept = part["dept"]
         if dept in touched:
-            rows[dept] = merge_partition(duck, base, delta_dir, dept, out)
+            rows[dept] = merge_partition(duck, base, delta_dir, dept, out, source)
         else:
             for kind in ("dpe", "search"):
                 src = _url(base, kind, f"dept={dept}", "part-0000.parquet")
@@ -289,7 +305,9 @@ def _published_ids(duck, root: Path | str, dept: str) -> list[str]:
     ]
 
 
-def reconcile(client, root: Path | str, *, quiet: bool = True) -> dict[str, Divergence]:
+def reconcile(
+    client, root: Path | str, *, quiet: bool = True, source: Source = EXISTANT
+) -> dict[str, Divergence]:
     """Compare every partition against ADEME, by count first and ids only if needed.
 
     The delta cannot see a deletion. `dpe03existant` is a Data Fair VIRTUAL
@@ -311,7 +329,7 @@ def reconcile(client, root: Path | str, *, quiet: bool = True) -> dict[str, Dive
     for part in manifest["partitions"]:
         dept = part["dept"]
         codes = part.get("codes", [dept])
-        upstream = sum(api.total(client, departement=c) for c in codes)
+        upstream = sum(api.total(client, departement=c, source=source) for c in codes)
         div = Divergence(dept=dept, published=part["rows"], upstream=upstream)
 
         if upstream != part["rows"]:
@@ -319,7 +337,11 @@ def reconcile(client, root: Path | str, *, quiet: bool = True) -> dict[str, Dive
             there: set[str] = set()
             for code in codes:
                 for page in api.iter_pages(
-                    client, departement=code, select=["numero_dpe"], page_size=PAGE_SIZE
+                    client,
+                    departement=code,
+                    select=["numero_dpe"],
+                    page_size=PAGE_SIZE,
+                    source=source,
                 ):
                     there.update(r["numero_dpe"] for r in page.rows)
 
@@ -344,7 +366,9 @@ def reconcile(client, root: Path | str, *, quiet: bool = True) -> dict[str, Dive
     return report
 
 
-def apply_deletions(root: Path | str, report: dict[str, Divergence], out: Path) -> list[str]:
+def apply_deletions(
+    root: Path | str, report: dict[str, Divergence], out: Path, source: Source = EXISTANT
+) -> list[str]:
     """Rewrite every partition that lost rows, and carry the rest over.
 
     Only deletions. Certificates that APPEARED upstream come back through the
@@ -366,8 +390,7 @@ def apply_deletions(root: Path | str, report: dict[str, Divergence], out: Path) 
 
         for kind, row_group, columns, order in (
             ("dpe", DPE_ROW_GROUP, "*", "numero_dpe"),
-            ("search", SEARCH_ROW_GROUP, ", ".join(f'"{c}"' for c in SEARCH_COLUMNS),
-             ", ".join(f'"{c}"' for c in SEARCH_SORT)),
+            ("search", SEARCH_ROW_GROUP, *_search(source)),
         ):
             src = _url(root, kind, f"dept={dept}", "part-0000.parquet")
             dest = out / kind / f"dept={dept}" / "part-0000.parquet"
@@ -417,11 +440,15 @@ def sharp_departure(runs: list[dict], rows_changed: int, *, window: int = 8, fac
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--base-url", required=True, help="the published v1/ directory or URL")
+    ap.add_argument(
+        "--base-url", required=True, help="the source's published tree (v1/ or v1/<subdir>), dir or URL"
+    )
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--since", help="override the manifest's high_water")
     ap.add_argument("--db-path", type=Path, help="keep the delta SQLite instead of a temp file")
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
     args = ap.parse_args(argv)
+    source = SOURCES[args.source]
 
     manifest = read_manifest(args.base_url)
     since = args.since or manifest.get("high_water")
@@ -430,19 +457,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"delta since {since}")
 
     tmp = Path(args.db_path) if args.db_path else Path(tempfile.mkdtemp()) / "delta.sqlite"
-    loaded = fetch_delta(api.client(), since, tmp, manifest, quiet=False)
+    loaded = fetch_delta(api.client(), since, tmp, manifest, quiet=False, source=source)
     print(f"fetched {loaded:,} modified certificates")
     if not loaded:
         print("nothing changed; the manifest is left alone")
         return 0
 
     delta_out = tmp.parent / "parquet"
-    export_parquet.export(tmp, delta_out)
-    # Into <out>/v1/, the same shape ademe.export_parquet writes and the same
+    export_parquet.export(tmp, delta_out, source=source)
+    # Into <out>/v1/<subdir>/, the shape ademe.export_parquet writes and the same
     # shape the published bucket has -- so the upload step copies v1/ to v1/
     # rather than having to know that this one command is different.
-    destination = args.out / export_parquet.VERSION
-    touched = merge(args.base_url, delta_out / export_parquet.VERSION, destination)
+    destination = args.out / export_parquet.VERSION / source.subdir
+    touched = merge(
+        args.base_url, delta_out / export_parquet.VERSION / source.subdir, destination, source=source
+    )
     print(f"rewrote {len(touched)} partition(s) into {destination}: {', '.join(touched)}")
     return 0
 
