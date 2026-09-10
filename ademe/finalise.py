@@ -24,6 +24,16 @@ from ademe import db, ddl
 from ademe.config import DATASET, DEFAULT_DB
 
 
+class Quarantined(RuntimeError):
+    """The load put certificates in `bad_row` and nobody has looked at them.
+
+    Quarantine keeps a seventeen-hour run alive through one malformed row. It
+    must not also be the thing that lets a systematically broken load look
+    finished: a schema change upstream would send every certificate here, and
+    the build would publish empty and green. So the count has to be
+    acknowledged before anything is published. See ADR-0015."""
+
+
 class Incomplete(RuntimeError):
     """A departement is still loading. Finalising now would ANALYZE a database
     that is about to change shape, and check foreign keys whose parents may
@@ -66,13 +76,37 @@ def check_foreign_keys(conn) -> None:
     )
 
 
-def finalise(conn, *, partial: bool = False, quiet: bool = True) -> int:
+def check_quarantine(conn, allow: int) -> int:
+    n = conn.execute("SELECT COUNT(*) FROM bad_row").fetchone()[0]
+    if n <= allow:
+        return n
+    sample = conn.execute(
+        "SELECT numero_dpe, code_departement, error FROM bad_row"
+        " ORDER BY seen_at LIMIT 5"
+    ).fetchall()
+    first = "\n  ".join(f"{r[0]} (dept {r[1]}): {r[2]}" for r in sample)
+    raise Quarantined(
+        f"{n} certificate(s) in bad_row, {allow} allowed.\n  {first}\n"
+        "Read them, decide whether the loss is acceptable, then re-run with"
+        f" --allow-bad-rows {n}."
+    )
+
+
+def finalise(
+    conn, *, partial: bool = False, quiet: bool = True, allow_bad_rows: int = 0
+) -> int:
     """Index, verify, analyse. Returns the `dpe` row count."""
     if not partial and (pending := unfinished(conn)):
         raise Incomplete(
             f"still loading: {', '.join(pending)}."
             " Finish the ingest, or pass --partial to finalise anyway."
         )
+
+    # Before the expensive work: a build nobody has looked at should not get an
+    # hour of B-tree building spent on it.
+    bad = check_quarantine(conn, allow_bad_rows)
+    if bad and not quiet:
+        print(f"  {bad} quarantined certificate(s), acknowledged")
 
     # Foreign keys BEFORE the indexes: a broken database should fail in seconds
     # rather than after an hour of B-tree building.
@@ -102,11 +136,22 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="finalise even though a departement is still loading",
     )
+    ap.add_argument(
+        "--allow-bad-rows",
+        type=int,
+        default=0,
+        help="proceed with this many quarantined certificates in bad_row",
+    )
     args = ap.parse_args(argv)
 
     conn = db.connect(args.db_path)
     try:
-        rows = finalise(conn, partial=args.partial, quiet=False)
+        rows = finalise(
+            conn,
+            partial=args.partial,
+            quiet=False,
+            allow_bad_rows=args.allow_bad_rows,
+        )
     finally:
         conn.close()
     print(f"finalised {args.db_path}: {rows:,} certificates")
