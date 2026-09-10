@@ -19,15 +19,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from ademe import api, db, ddl, spec
-from ademe.config import DEFAULT_DB, PAGE_SIZE
-from ademe.mapping import (
-    ADRESSE_BRUT_COLUMNS,
-    ADRESSE_COLUMNS,
-    COMMUNE_COLUMNS,
-    INTERNAL_COLUMNS,
-    REPEATS,
-    check_coverage,
-)
+from ademe.config import DEFAULT_DB, EXISTANT, PAGE_SIZE, Source
+from ademe.mapping import check_coverage
 
 EPOCH = date(1970, 1, 1)
 MIN_FREE_BYTES = 1_500_000_000
@@ -74,10 +67,12 @@ class Accumulator:
 
 
 class Loader:
-    def __init__(self, conn, cols: dict[str, spec.Column]):
+    def __init__(self, conn, cols: dict[str, spec.Column], source: Source = EXISTANT):
         self.conn = conn
         self.cols = cols
-        self.cov = check_coverage(list(cols))
+        self.source = source
+        self.m = source.mapping
+        self.cov = check_coverage(list(cols), self.m)
         self.vocab: dict[str, dict[str, int]] = {}
         self.commune: dict[tuple, int] = {}
         self.adresse: dict[tuple, int] = {}
@@ -129,7 +124,7 @@ class Loader:
         Keyed on the whole tuple, so a resumed run recognises a commune it
         already wrote instead of writing it again.
         """
-        cols = ddl.commune_key_columns(self.cols)
+        cols = ddl.commune_key_columns(self.cols, self.source)
         quoted = ", ".join(f'"{c}"' for c in cols)
         self.commune = {
             tuple(r[1:]): r[0]
@@ -169,7 +164,7 @@ class Loader:
         if not insee:
             return None
         names, vals = [], []
-        for src, dst in COMMUNE_COLUMNS.items():
+        for src, dst in self.m.commune.items():
             if dst == "code_insee":
                 continue
             names.append(ddl.dest_name(self.cols[src], dst))
@@ -205,7 +200,7 @@ class Loader:
         departements, so a national dict would be 5M entries of pure waste.
         """
         vals = []
-        for src, dst in ADRESSE_COLUMNS.items():
+        for src, dst in self.m.adresse.items():
             c = self.cols[src]
             raw = row.get(src) or ""
             if not raw:
@@ -226,7 +221,7 @@ class Loader:
 
         names = [
             f'"{ddl.dest_name(self.cols[s], d)}"'
-            for s, d in ADRESSE_COLUMNS.items()
+            for s, d in self.m.adresse.items()
         ]
         cur = self.conn.execute(
             f"INSERT INTO adresse ({', '.join(names)}, commune_id)"
@@ -319,7 +314,7 @@ class Loader:
 
     def _load_rows(self, rows: list[dict]) -> None:
         self._page_mark = self._cache_mark()
-        acc = Accumulator(REPEATS)
+        acc = Accumulator(self.m.repeats)
         for row in rows:
             self._convert_row(row, acc)
         self._flush(acc)
@@ -331,7 +326,7 @@ class Loader:
             mark = self._cache_mark()
             self.conn.execute("SAVEPOINT row")
             try:
-                acc = Accumulator(REPEATS)
+                acc = Accumulator(self.m.repeats)
                 self._convert_row(row, acc)
                 self._flush(acc)
             except Exception as exc:
@@ -380,11 +375,11 @@ class Loader:
         dpe_id = got[0]
         acc.violations.extend((dpe_id, k, r) for k, r in bad)
 
-        brut = [self.convert(s, row.get(s, ""))[0] for s in ADRESSE_BRUT_COLUMNS]
+        brut = [self.convert(s, row.get(s, ""))[0] for s in self.m.adresse_brut]
         if any(v is not None for v in brut):
             acc.brut.append((dpe_id, *brut))
 
-        for rep in REPEATS:
+        for rep in self.m.repeats:
             for slot in rep.slots():
                 vals = []
                 for src in slot["src_to_dst"]:
@@ -403,14 +398,14 @@ class Loader:
         if acc.brut:
             cols = ", ".join(
                 f'"{ddl.dest_name(self.cols[s], d)}"'
-                for s, d in ADRESSE_BRUT_COLUMNS.items()
+                for s, d in self.m.adresse_brut.items()
             )
             self.conn.executemany(
                 f"INSERT INTO dpe_adresse_brut (dpe_id, {cols})"
-                f" VALUES ({', '.join('?' * (len(ADRESSE_BRUT_COLUMNS) + 1))})",
+                f" VALUES ({', '.join('?' * (len(self.m.adresse_brut) + 1))})",
                 acc.brut,
             )
-        for rep in REPEATS:
+        for rep in self.m.repeats:
             batch = acc.children[rep.table]
             if not batch:
                 continue
@@ -516,7 +511,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     scales = {r["column_name"]: r["scale"] for r in meta}
-    cols = {k: v for k, v in spec.load(scales).items() if k not in INTERNAL_COLUMNS}
+    cols = {k: v for k, v in spec.load(scales).items() if k not in EXISTANT.mapping.internal}
 
     todo = args.dept or departements(client)
     loader = Loader(conn, cols)

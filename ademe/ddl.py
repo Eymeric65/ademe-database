@@ -9,14 +9,8 @@ makes "lossless" untrue quietly.
 from __future__ import annotations
 
 from ademe import spec
-from ademe.mapping import (
-    ADRESSE_BRUT_COLUMNS,
-    ADRESSE_COLUMNS,
-    COMMUNE_COLUMNS,
-    INTERNAL_COLUMNS,
-    REPEATS,
-    check_coverage,
-)
+from ademe.config import EXISTANT, Source
+from ademe.mapping import check_coverage
 
 
 def _col_sql(c: spec.Column, name: str | None = None) -> tuple[str, str]:
@@ -111,13 +105,13 @@ def vocab_ddl(cols: dict[str, spec.Column]) -> list[str]:
     return out
 
 
-def reference_ddl(cols: dict[str, spec.Column]) -> list[str]:
+def reference_ddl(cols: dict[str, spec.Column], source: Source = EXISTANT) -> list[str]:
     commune_cols = [
         _col_sql(cols[src], dst)[1]
-        for src, dst in COMMUNE_COLUMNS.items()
+        for src, dst in source.mapping.commune.items()
         if dst != "code_insee"
     ]
-    adresse_cols = [_col_sql(cols[src], dst)[1] for src, dst in ADRESSE_COLUMNS.items()]
+    adresse_cols = [_col_sql(cols[src], dst)[1] for src, dst in source.mapping.adresse.items()]
     return [
         # TRAP: the primary key is a surrogate, and the dedup key is the WHOLE
         # tuple -- not code_insee. ADEME does not normalise `nom_commune_ban`,
@@ -141,7 +135,7 @@ def reference_ddl(cols: dict[str, spec.Column]) -> list[str]:
     ]
 
 
-def dpe_ddl(cols: dict[str, spec.Column], cov) -> list[str]:
+def dpe_ddl(cols: dict[str, spec.Column], cov, source: Source = EXISTANT) -> list[str]:
     body = []
     for key in cov.dpe:
         if key == "numero_dpe":
@@ -158,12 +152,12 @@ def dpe_ddl(cols: dict[str, spec.Column], cov) -> list[str]:
 )""",
         f"""CREATE TABLE IF NOT EXISTS dpe_adresse_brut (
     dpe_id INTEGER PRIMARY KEY REFERENCES dpe(dpe_id),
-    {",\n    ".join(_col_sql(cols[s], d)[1] for s, d in ADRESSE_BRUT_COLUMNS.items())}
+    {",\n    ".join(_col_sql(cols[s], d)[1] for s, d in source.mapping.adresse_brut.items())}
 ) WITHOUT ROWID""",
     ]
 
 
-def repeat_ddl(cols: dict[str, spec.Column]) -> list[str]:
+def repeat_ddl(cols: dict[str, spec.Column], source: Source = EXISTANT) -> list[str]:
     """Child tables, WITHOUT ROWID.
 
     The primary key IS the table, so there is no separate rowid and no index on
@@ -171,7 +165,7 @@ def repeat_ddl(cols: dict[str, spec.Column]) -> list[str]:
     and ~11 B of plumbing per row.
     """
     out = []
-    for rep in REPEATS:
+    for rep in source.mapping.repeats:
         slot = rep.slots()[0]
         keys = ["dpe_id", "rang"] + (["rang_generateur"] if rep.inner else [])
         body = []
@@ -189,30 +183,34 @@ def repeat_ddl(cols: dict[str, spec.Column]) -> list[str]:
     return out
 
 
-def all_ddl(cols: dict[str, spec.Column] | None = None) -> list[str]:
-    cols = cols if cols is not None else spec.load()
-    cov = check_coverage([k for k in cols])
+def all_ddl(
+    cols: dict[str, spec.Column] | None = None, source: Source = EXISTANT
+) -> list[str]:
+    cols = cols if cols is not None else spec.load(source=source)
+    cov = check_coverage([k for k in cols], source.mapping)
     return (
         bookkeeping_ddl()
-        + vocab_ddl({k: v for k, v in cols.items() if k not in INTERNAL_COLUMNS})
-        + reference_ddl(cols)
-        + dpe_ddl(cols, cov)
-        + repeat_ddl(cols)
+        + vocab_ddl({k: v for k, v in cols.items() if k not in source.mapping.internal})
+        + reference_ddl(cols, source)
+        + dpe_ddl(cols, cov, source)
+        + repeat_ddl(cols, source)
     )
 
 
-def commune_key_columns(cols: dict[str, spec.Column] | None = None) -> list[str]:
+def commune_key_columns(
+    cols: dict[str, spec.Column] | None = None, source: Source = EXISTANT
+) -> list[str]:
     """The columns a commune is deduplicated on: all of them."""
-    cols = cols if cols is not None else spec.load()
+    cols = cols if cols is not None else spec.load(source=source)
     out = ["code_insee"]
-    for src, dst in COMMUNE_COLUMNS.items():
+    for src, dst in source.mapping.commune.items():
         if dst == "code_insee":
             continue
         out.append(dest_name(cols[src], dst))
     return out
 
 
-def indexes_ddl() -> list[str]:
+def indexes_ddl(source: Source = EXISTANT) -> list[str]:
     """Built by `finalise`, after the load: creating them up front would make
     every insert maintain a B-tree it does not need yet."""
     return [
@@ -228,31 +226,32 @@ def indexes_ddl() -> list[str]:
         # UNIQUE so `finalise` fails loudly if the loader ever wrote a true
         # duplicate; the load itself dedups through the Loader's cache.
         "CREATE UNIQUE INDEX IF NOT EXISTS ux_commune_tuple ON commune("
-        + ", ".join(commune_key_columns())
+        + ", ".join(commune_key_columns(source=source))
         + ")",
         # `code_departement` is a vocabulary reference, so the column is _id.
         "CREATE INDEX IF NOT EXISTS ix_commune_dept ON commune(code_departement_id)",
     ]
 
 
-def column_meta_rows(cols: dict[str, spec.Column]) -> list[tuple]:
-    cov = check_coverage(list(cols))
+def column_meta_rows(cols: dict[str, spec.Column], source: Source = EXISTANT) -> list[tuple]:
+    m = source.mapping
+    cov = check_coverage(list(cols), m)
     dest = {}
     for k in cov.dpe:
         dest[k] = ("dpe", k)
-    for src, dst in COMMUNE_COLUMNS.items():
+    for src, dst in m.commune.items():
         dest[src] = ("commune", dst)
-    for src, dst in ADRESSE_COLUMNS.items():
+    for src, dst in m.adresse.items():
         dest[src] = ("adresse", dst)
-    for src, dst in ADRESSE_BRUT_COLUMNS.items():
+    for src, dst in m.adresse_brut.items():
         dest[src] = ("dpe_adresse_brut", dst)
-    for rep in REPEATS:
+    for rep in m.repeats:
         for s in rep.slots():
             for src, dst in s["src_to_dst"].items():
                 dest[src] = (rep.table, dst)
     rows = []
     for key, c in cols.items():
-        if key in INTERNAL_COLUMNS:
+        if key in m.internal:
             continue
         table, dst = dest[key]
         encoding, domain = c.encoding, c.domain

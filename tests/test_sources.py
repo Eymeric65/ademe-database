@@ -20,7 +20,7 @@ import json
 import httpx
 import pytest
 
-from ademe import api, config, spec
+from ademe import api, config, mapping, spec
 from ademe.config import EXISTANT, SOURCES, Source
 
 # `adresse_brut` is the trap: in existing housing the HEADER `adresse_brut`
@@ -43,6 +43,8 @@ def other(tmp_path) -> Source:
         schema_json=path,
         db_path=tmp_path / "other.sqlite",
         subdir="other",
+        # No repeating groups and no address to deduplicate: three columns.
+        mapping=mapping.Mapping(repeats=(), commune={}, adresse={}, adresse_brut={}),
     )
 
 

@@ -15,7 +15,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from ademe.ingest import EPOCH
-from ademe.mapping import REPEATS
+from ademe.config import EXISTANT, Source
 
 
 def _fmt_scaled(value: int, scale: int) -> str:
@@ -26,8 +26,9 @@ def _fmt_scaled(value: int, scale: int) -> str:
 
 
 class Reconstructor:
-    def __init__(self, conn):
+    def __init__(self, conn, source: Source = EXISTANT):
         self.conn = conn
+        self.repeats = source.mapping.repeats
         self.meta = {
             r["column_name"]: dict(r)
             for r in conn.execute("SELECT * FROM column_meta").fetchall()
@@ -104,7 +105,7 @@ class Reconstructor:
         brut = dict(got) if got else {}
 
         children: dict[str, dict[tuple, dict]] = {}
-        for rep in REPEATS:
+        for rep in self.repeats:
             rows = self.conn.execute(
                 f"SELECT * FROM {rep.table} WHERE dpe_id = ?", (dpe_id,)
             ).fetchall()
@@ -129,7 +130,7 @@ class Reconstructor:
             else:
                 out[col] = ""  # filled below, where the slot is known
 
-        for rep in REPEATS:
+        for rep in self.repeats:
             for slot in rep.slots():
                 k = (slot["outer"], slot["inner"])
                 got = children[rep.table].get(k, {})
