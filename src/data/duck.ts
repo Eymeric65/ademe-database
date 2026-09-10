@@ -225,7 +225,9 @@ export async function search(spec: QuerySpec): Promise<Hit[]> {
   const list = files.map((f) => `'${f}'`).join(', ')
   const replace = await decimalReplace((n) => SEARCH_DECIMALS.includes(n))
   const sql =
-    `SELECT * REPLACE (${replace}) FROM read_parquet([${list}])` +
+    // hive_partitioning = false: otherwise DuckDB adds a `dept` column read off
+    // the `dept=NN/` in the path, which no file has.
+    `SELECT * REPLACE (${replace}) FROM read_parquet([${list}], hive_partitioning = false)` +
     ` WHERE ${where} ${order} LIMIT ${LIMIT}`
 
   const conn = await (await db()).connect()
@@ -314,10 +316,11 @@ export async function detail(numero: string): Promise<Record<string, unknown> | 
   const conn = await (await db()).connect()
   try {
     // One row group of one partition, because the wide file is sorted by
-    // numero_dpe (ADR-0006).
+    // numero_dpe (ADR-0006). hive_partitioning = false, or the detail lists a
+    // `dept` column that DuckDB read off the path.
     const replace = await decimalReplace()
     const stmt = await conn.prepare(
-      `SELECT * REPLACE (${replace}) FROM read_parquet('${file}') WHERE numero_dpe = ? LIMIT 1`,
+      `SELECT * REPLACE (${replace}) FROM read_parquet('${file}', hive_partitioning = false) WHERE numero_dpe = ? LIMIT 1`,
     )
     const table = await stmt.query(numero)
     const rows = table.toArray()

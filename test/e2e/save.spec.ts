@@ -41,6 +41,21 @@ test('the detail view shows a column only the wide file has', async ({ page }) =
   await expect(page.getByText('conso_5_usages_ef', { exact: false }).first()).toBeVisible()
 })
 
+test('the detail view shows no column the file path invented', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-dept'))
+  await findTarget(page)
+  await page.getByRole('link', { name: TARGET.address }).click()
+
+  // The wide file's own column first, so the count below runs on a loaded
+  // detail and not on an empty page, where it would pass for nothing.
+  await expect(page.getByText('conso_5_usages_ef', { exact: false }).first()).toBeVisible({
+    timeout: 30_000,
+  })
+  // `dept` is not a column of the wide file. DuckDB derives it from the
+  // `dept=09/` in the path unless told not to, and the detail lists every key.
+  await expect(page.locator('dt').filter({ hasText: /^dept$/ })).toHaveCount(0)
+})
+
 test('a signed-in user saves a certificate and finds it again', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('save'))
   await findTarget(page)
