@@ -18,6 +18,43 @@ DATASET = "dpe03existant"
 API = f"https://data.ademe.fr/data-fair/api/v1/datasets/{DATASET}"
 LICENCE = "Licence Ouverte 2.0 (Etalab)"
 
+
+
+def _dotenv(path: Path) -> None:
+    """Read `KEY=value` lines from `.env` into the environment, if it exists.
+
+    The repo root, because a key passed on the command line lands in shell
+    history and a key exported from `~/.bashrc` lands in every process on the
+    machine. `.env` is git-ignored.
+
+    TRAP: `uv run` does NOT read `.env` -- it needs `--env-file .env` or
+    `UV_ENV_FILE`, and forgetting either is silent. The ingest simply runs at
+    the anonymous rate and finishes in twice the time. Reading the file here
+    is what makes every entry point behave the same way.
+
+    A real environment variable always wins, so `ADEME_API_KEY=... uv run ...`
+    still overrides the file for a one-off.
+    """
+    try:
+        text = path.read_text()
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_dotenv(REPO / ".env")
+
+# Optional. ADEME rate-limits per caller: an anonymous one gets 500 kB/s of
+# dynamic responses, an authenticated one 1 MB/s. Absent is the supported
+# state -- the weekly delta is minutes either way, and only the once-ever base
+# build is long enough for the difference to matter. See ADR-0013.
+API_KEY = os.environ.get("ADEME_API_KEY") or None
+
 # Measured: 40 s per 10 000 rows. Larger pages do not go faster (the server is
 # the limit) and cost more to re-fetch on a retry.
 PAGE_SIZE = 10_000

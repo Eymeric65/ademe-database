@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import httpx
 
 from ademe import spec
-from ademe.config import API, PAGE_SIZE
+from ademe.config import API, API_KEY, PAGE_SIZE
 
 _NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="?next"?', re.I)
 
@@ -146,8 +146,54 @@ def iter_pages(
 
 
 def client() -> httpx.Client:
-    return httpx.Client(
-        timeout=TIMEOUT,
-        follow_redirects=True,
-        headers={"user-agent": "ademe-database/0.1 (local research build)"},
+    headers = {"user-agent": "ademe-database/0.1 (local research build)"}
+    if API_KEY:
+        # `x-apiKey` is what the server's own OpenAPI declares; see ADR-0013,
+        # and `test_api_key.py::test_the_server_still_documents_this_header`.
+        headers["x-apiKey"] = API_KEY
+    return httpx.Client(timeout=TIMEOUT, follow_redirects=True, headers=headers)
+
+
+# Documented on https://data.ademe.fr/pages/faq, in kB/s of dynamic response.
+ANON_KBPS = 500
+AUTH_KBPS = 1000
+
+
+def measure(page_size: int = PAGE_SIZE) -> float:
+    """kB/s on one page, at the size the ingest actually uses."""
+    cl = client()
+    url = f"{API}/lines"
+    params = {"size": page_size, "format": "csv", "sort": "_i"}
+    t0 = time.monotonic()
+    p = page(cl, url, params)
+    return p.nbytes / 1000 / max(time.monotonic() - t0, 1e-9)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m ademe.api` -- is the key doing anything?
+
+    TRAP: this server does not reject an `x-apiKey` it has never seen. It
+    answers 200 and quietly applies the anonymous limits, so a typo is
+    invisible until the run that was meant to take nine hours takes eighteen.
+    Nothing in the response says which budget you are on. Measuring is the
+    only honest test, and one page is enough because the cap is a sustained
+    rate rather than a burst.
+    """
+    print("ADEME_API_KEY:", "set" if API_KEY else "not set (anonymous)")
+    rate = measure()
+    print(f"measured: {rate:,.0f} kB/s on one page of {PAGE_SIZE:,} rows")
+    midpoint = (ANON_KBPS + AUTH_KBPS) / 2
+    if rate >= midpoint:
+        print(f"-> authenticated limits (~{AUTH_KBPS} kB/s). The key is live.")
+        return 0
+    print(
+        f"-> anonymous limits (~{ANON_KBPS} kB/s).",
+        "The key is not being honoured -- check it was copied whole."
+        if API_KEY
+        else "Set ADEME_API_KEY to double this.",
     )
+    return 0 if not API_KEY else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
