@@ -239,6 +239,11 @@ class Mapping:
     adresse: dict[str, str]
     adresse_brut: dict[str, str]
     internal: frozenset[str] = frozenset(INTERNAL_COLUMNS)
+    # The row key, the partition field and the incremental key. The DPE
+    # datasets share these names; the audits do not. See ADR-0029.
+    key: str = "numero_dpe"
+    departement: str = "code_departement_ban"
+    modified: str = "date_derniere_modification_dpe"
 
     def without(self, absent: Iterable[str]) -> Mapping:
         """This structure, for a dataset that lacks the columns in `absent`.

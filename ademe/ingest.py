@@ -108,7 +108,7 @@ class Loader:
         """
         self.conn.execute(ddl.BAD_ROW_DDL)
         self.conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe(numero_dpe)"
+            f"CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe({self.m.key})"
         )
         self.conn.commit()
 
@@ -281,8 +281,8 @@ class Loader:
             "INSERT INTO bad_row (numero_dpe, code_departement, error, raw)"
             " VALUES (?,?,?,?)",
             (
-                row.get("numero_dpe"),
-                row.get("code_departement_ban"),
+                row.get(self.m.key),
+                row.get(self.m.departement),
                 f"{type(exc).__name__}: {exc}",
                 json.dumps(row, ensure_ascii=False, sort_keys=True),
             ),
@@ -336,13 +336,14 @@ class Loader:
             self.conn.execute("RELEASE row")
 
     def _insert_sql(self) -> tuple[str, list[str]]:
-        dpe_cols = [k for k in self.cov.dpe if k != "numero_dpe"]
+        key = self.m.key
+        dpe_cols = [k for k in self.cov.dpe if k != key]
         names = ", ".join(f'"{ddl.dest_name(self.cols[k])}"' for k in dpe_cols)
         placeholders = ", ".join("?" * (len(dpe_cols) + 4))
         return (
-            f"INSERT INTO dpe (numero_dpe, adresse_id, lat, lon, {names})"
+            f"INSERT INTO dpe ({key}, adresse_id, lat, lon, {names})"
             f" VALUES ({placeholders})"
-            " ON CONFLICT(numero_dpe) DO NOTHING RETURNING dpe_id",
+            f" ON CONFLICT({key}) DO NOTHING RETURNING dpe_id",
             dpe_cols,
         )
 
@@ -363,7 +364,7 @@ class Loader:
             except (ValueError, InvalidOperation):
                 pass
         got = self.conn.execute(
-            insert, (row.get("numero_dpe"), aid, lat, lon, *vals)
+            insert, (row.get(self.m.key), aid, lat, lon, *vals)
         ).fetchone()
         if got is None:
             # Already loaded -- a resumed cursor served it twice. Its children
@@ -427,7 +428,7 @@ class Loader:
 
 
 def departements(client, source: Source = EXISTANT) -> list[str]:
-    r = api._get(client, f"{source.api}/values/code_departement_ban", {"size": 200})
+    r = api._get(client, f"{source.api}/values/{source.mapping.departement}", {"size": 200})
     # ADEME's list is of the departements that exist; NG is the certificates
     # that have none (ADR-0024).
     return sorted(v for v in r.json() if v) + [UNGEOCODED]

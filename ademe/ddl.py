@@ -147,13 +147,13 @@ def reference_ddl(cols: dict[str, spec.Column], source: Source = EXISTANT) -> li
 def dpe_ddl(cols: dict[str, spec.Column], cov, source: Source = EXISTANT) -> list[str]:
     body = []
     for key in cov.dpe:
-        if key == "numero_dpe":
+        if key == source.mapping.key:
             continue
         body.append(_col_sql(cols[key])[1])
     return [
         f"""CREATE TABLE IF NOT EXISTS dpe (
     dpe_id     INTEGER PRIMARY KEY,
-    numero_dpe TEXT NOT NULL,
+    {source.mapping.key} TEXT NOT NULL,
     adresse_id INTEGER REFERENCES adresse(adresse_id),
     lat        INTEGER,
     lon        INTEGER,
@@ -223,7 +223,7 @@ def indexes_ddl(source: Source = EXISTANT) -> list[str]:
     """Built by `finalise`, after the load: creating them up front would make
     every insert maintain a B-tree it does not need yet."""
     return [
-        "CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe(numero_dpe)",
+        f"CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe({source.mapping.key})",
         "CREATE INDEX IF NOT EXISTS ix_dpe_adresse ON dpe(adresse_id)",
         # TRAP: not UNIQUE. `ingest.adresse_id` keys on the whole address tuple
         # rather than on identifiant_ban, because certificates sharing a BAN

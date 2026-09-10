@@ -99,7 +99,7 @@ def fetch_delta(
         loaded = 0
         # Inclusive lower bound: the mark is a DATE, so a strict bound would
         # drop everything else modified on the same day as the last run.
-        qs = f"date_derniere_modification_dpe:[{since} TO *]"
+        qs = f"{source.mapping.modified}:[{since} TO *]"
         for page in api.iter_pages(client, qs=qs, page_size=page_size, source=source):
             with db.transaction(conn):
                 loaded += loader.load_page(page.rows)
@@ -148,10 +148,12 @@ def merge_partition(
     Anti-join on numero_dpe, never a plain UNION: a certificate that was
     modified exists in both, and appending would publish it twice -- which the
     search would show as a duplicate result and the detail view would resolve
-    arbitrarily.
+    arbitrarily. On the source's own key (ADR-0029): an audit's steps share a
+    numero_dpe, and anti-joining on it would delete a changed step's siblings.
     """
+    key = source.mapping.key
     for kind, row_group, columns, order in (
-        ("dpe", DPE_ROW_GROUP, "*", "numero_dpe"),
+        ("dpe", DPE_ROW_GROUP, "*", key),
         ("search", SEARCH_ROW_GROUP, *_search(source)),
     ):
         base_file = _url(base, kind, f"dept={dept}", "part-0000.parquet")
@@ -163,8 +165,8 @@ def merge_partition(
             f"""COPY (
                   SELECT {columns} FROM (
                     SELECT * FROM read_parquet('{base_file}')
-                    WHERE numero_dpe NOT IN (
-                      SELECT numero_dpe FROM read_parquet('{delta_file}')
+                    WHERE {key} NOT IN (
+                      SELECT {key} FROM read_parquet('{delta_file}')
                     )
                     UNION ALL BY NAME
                     SELECT * FROM read_parquet('{delta_file}')
@@ -295,12 +297,12 @@ class Divergence:
         return not self.gone and not self.appeared
 
 
-def _published_ids(duck, root: Path | str, dept: str) -> list[str]:
+def _published_ids(duck, root: Path | str, dept: str, key: str = "numero_dpe") -> list[str]:
     path = _url(root, "dpe", f"dept={dept}", "part-0000.parquet")
     return [
         r[0]
         for r in duck.execute(
-            f"SELECT numero_dpe FROM read_parquet('{path}')"
+            f"SELECT {key} FROM read_parquet('{path}')"
         ).fetchall()
     ]
 
@@ -333,17 +335,18 @@ def reconcile(
         div = Divergence(dept=dept, published=part["rows"], upstream=upstream)
 
         if upstream != part["rows"]:
-            here = set(_published_ids(duck, root, dept))
+            key = source.mapping.key
+            here = set(_published_ids(duck, root, dept, key))
             there: set[str] = set()
             for code in codes:
                 for page in api.iter_pages(
                     client,
                     departement=code,
-                    select=["numero_dpe"],
+                    select=[key],
                     page_size=PAGE_SIZE,
                     source=source,
                 ):
-                    there.update(r["numero_dpe"] for r in page.rows)
+                    there.update(r[key] for r in page.rows)
 
             # TRAP: upstream has to agree with itself before we act on it.
             # Deleting rows on the strength of a total that disagrees with the
@@ -387,9 +390,10 @@ def apply_deletions(
         dept = part["dept"]
         div = report.get(dept)
         gone = div.gone if div else []
+        key = source.mapping.key
 
         for kind, row_group, columns, order in (
-            ("dpe", DPE_ROW_GROUP, "*", "numero_dpe"),
+            ("dpe", DPE_ROW_GROUP, "*", key),
             ("search", SEARCH_ROW_GROUP, *_search(source)),
         ):
             src = _url(root, kind, f"dept={dept}", "part-0000.parquet")
@@ -401,7 +405,7 @@ def apply_deletions(
             ids = ", ".join(f"'{n}'" for n in gone)
             duck.execute(
                 f"COPY (SELECT {columns} FROM read_parquet('{src}')"
-                f" WHERE numero_dpe NOT IN ({ids}) ORDER BY {order}) TO '{dest}'"
+                f" WHERE {key} NOT IN ({ids}) ORDER BY {order}) TO '{dest}'"
                 f" (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group})"
             )
         if gone:

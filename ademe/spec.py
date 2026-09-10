@@ -131,8 +131,8 @@ def _encoding(f: dict, scales: dict[str, int], source: Source) -> tuple[str, str
     # TRAP: the record key is stored raw in dpe's own NOT NULL column
     # (ddl.dpe_ddl), whatever its cardinality. Below the dictionary threshold --
     # new housing's 1.42M certificates -- it would otherwise be recorded as a
-    # vocabulary column that does not exist. See ADR-0025.
-    if key == "numero_dpe":
+    # vocabulary column that does not exist. See ADR-0025 and ADR-0029.
+    if key == source.mapping.key:
         return TEXT, None, 1
     if fmt == "date":
         return DATE, None, 1
