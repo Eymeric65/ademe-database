@@ -18,6 +18,12 @@ DATASET = "dpe03existant"
 API = f"https://data.ademe.fr/data-fair/api/v1/datasets/{DATASET}"
 LICENCE = "Licence Ouverte 2.0 (Etalab)"
 
+# Optional. ADEME rate-limits per caller: an anonymous one gets 500 kB/s of
+# dynamic responses, an authenticated one 1 MB/s. Absent is the supported
+# state -- the weekly delta is minutes either way, and only the once-ever base
+# build is long enough for the difference to matter. See ADR-0013.
+API_KEY = os.environ.get("ADEME_API_KEY") or None
+
 # Measured: 40 s per 10 000 rows. Larger pages do not go faster (the server is
 # the limit) and cost more to re-fetch on a retry.
 PAGE_SIZE = 10_000

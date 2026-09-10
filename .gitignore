@@ -19,3 +19,6 @@ __pycache__
 .pytest_cache
 .venv
 .claude
+
+# ADEME_API_KEY lives here, never in the repo. See ADR-0013.
+.env
