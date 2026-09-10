@@ -19,7 +19,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from ademe import api, db, ddl, spec
-from ademe.config import DEFAULT_DB, EXISTANT, PAGE_SIZE, Source
+from ademe.config import DEFAULT_DB, EXISTANT, PAGE_SIZE, UNGEOCODED, Source
 from ademe.mapping import check_coverage
 
 EPOCH = date(1970, 1, 1)
@@ -430,7 +430,9 @@ def departements(client) -> list[str]:
     from ademe.config import API
 
     r = api._get(client, f"{API}/values/code_departement_ban", {"size": 200})
-    return sorted(v for v in r.json() if v)
+    # ADEME's list is of the departements that exist; NG is the certificates
+    # that have none (ADR-0024).
+    return sorted(v for v in r.json() if v) + [UNGEOCODED]
 
 
 def ingest_departement(conn, loader: Loader, client, code: str, *, quiet=False) -> int:
