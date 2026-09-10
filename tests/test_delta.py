@@ -290,7 +290,7 @@ class FakeApi:
         self.lie = lie_about_total
         self.pulled: list[str] = []
 
-    def total(self, _client, *, departement=None, qs=None):
+    def total(self, _client, *, departement=None, qs=None, source=None):
         if self.lie is not None and departement is not None:
             return self.lie
         if departement is not None:
