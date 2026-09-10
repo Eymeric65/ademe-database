@@ -65,18 +65,31 @@ def built(tmp_path):
     conn.close()
 
 
+def _index(conn, name):
+    return conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name=?", (name,)
+    ).fetchone()
+
+
 def test_builds_indexes_and_records_the_row_count(built):
     conn, _ = built
-    before = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='ux_dpe_numero'"
-    ).fetchone()
-    assert before is None, "the index must not exist before finalise runs"
+    # The deferral still holds for every index the load does not need: creating
+    # them up front would make each insert maintain a B-tree for nothing.
+    assert _index(conn, "ix_dpe_adresse") is None, (
+        "the deferred indexes must not exist before finalise runs"
+    )
+    # ux_dpe_numero is the one exception, and it is created by the LOAD, not
+    # here: a resumed cursor can re-serve certificates already written, and
+    # without this index the second copy inserts silently. ADR-0014.
+    assert _index(conn, "ux_dpe_numero"), (
+        "the load must have created ux_dpe_numero -- without it a resumed "
+        "departement duplicates instead of skipping"
+    )
 
     finalise.finalise(conn)
 
-    assert conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='ux_dpe_numero'"
-    ).fetchone(), "ux_dpe_numero was not created"
+    assert _index(conn, "ux_dpe_numero"), "ux_dpe_numero was not created"
+    assert _index(conn, "ix_dpe_adresse"), "ix_dpe_adresse was not created"
     assert not conn.execute("PRAGMA foreign_key_check").fetchall()
     assert conn.execute("SELECT upstream_rows FROM data_source").fetchone()[0] == 4
 
