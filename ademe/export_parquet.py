@@ -189,8 +189,20 @@ class Plan:
         return f"CAST({qualified} AS VARCHAR)"
 
 
-def wide_select(conn, *, where: str = "TRUE", source: Source = EXISTANT) -> str:
-    """The full 226-column projection plus lat/lon, as one SELECT."""
+def wide_select(
+    conn, *, where: str = "TRUE", source: Source = EXISTANT, tables: dict[str, str] | None = None
+) -> str:
+    """The full 226-column projection plus lat/lon, as one SELECT.
+
+    `tables` reads a SQLite table from somewhere else: the export's copies
+    narrowed to one partition (ADR-0028). A table it does not name is read
+    from the attached SQLite, `sq`.
+    """
+    narrowed = tables or {}
+
+    def t(name: str) -> str:
+        return narrowed.get(name, f"sq.{name}")
+
     plan = Plan(conn, source)
     cols = [f'd.numero_dpe AS "numero_dpe"']
     for col in plan.meta:
@@ -204,9 +216,9 @@ def wide_select(conn, *, where: str = "TRUE", source: Source = EXISTANT) -> str:
     cols.append('CAST(g.lon AS DECIMAL(10,6)) AS "lon"')
 
     joins = [
-        "LEFT JOIN sq.adresse a ON a.adresse_id = d.adresse_id",
-        "LEFT JOIN sq.commune cm ON cm.commune_id = a.commune_id",
-        "LEFT JOIN sq.dpe_adresse_brut br ON br.dpe_id = d.dpe_id",
+        f"LEFT JOIN {t('adresse')} a ON a.adresse_id = d.adresse_id",
+        f"LEFT JOIN {t('commune')} cm ON cm.commune_id = a.commune_id",
+        f"LEFT JOIN {t('dpe_adresse_brut')} br ON br.dpe_id = d.dpe_id",
         "LEFT JOIN geopoint g ON g.dpe_id = d.dpe_id",
     ]
     for rep in source.mapping.repeats:
@@ -215,14 +227,14 @@ def wide_select(conn, *, where: str = "TRUE", source: Source = EXISTANT) -> str:
             on = [f"{a}.dpe_id = d.dpe_id", f"{a}.rang = {slot['outer']}"]
             if slot["inner"] is not None:
                 on.append(f"{a}.rang_generateur = {slot['inner']}")
-            joins.append(f"LEFT JOIN sq.{rep.table} {a} ON " + " AND ".join(on))
+            joins.append(f"LEFT JOIN {t(rep.table)} {a} ON " + " AND ".join(on))
     for _col, (v, domain, key) in plan.vocab_join.items():
-        joins.append(f"LEFT JOIN sq.vocab_{domain} {v} ON {v}.id = {key}")
+        joins.append(f"LEFT JOIN {t(f'vocab_{domain}')} {v} ON {v}.id = {key}")
 
     return (
         "SELECT\n  "
         + ",\n  ".join(cols)
-        + "\nFROM sq.dpe d\n"
+        + f"\nFROM {t('dpe')} d\n"
         + "\n".join(joins)
         + f"\nWHERE {where}"
     )
@@ -369,8 +381,25 @@ def export(
         if rows:
             duck.executemany("INSERT INTO geopoint VALUES (?, ?, ?)", rows)
 
+        # Every per-certificate table, narrowed to this partition BEFORE the
+        # join. Joined whole, each repeating-group slot hashed a national table
+        # and the first national partition ran out of memory. See ADR-0028.
+        narrowed = {"dpe": "p_dpe", "adresse": "p_adresse"}
+        duck.execute(f"CREATE OR REPLACE TEMP TABLE p_dpe AS SELECT * FROM sq.dpe d WHERE {where}")
         duck.execute(
-            f"CREATE OR REPLACE TEMP TABLE wide AS {wide_select(conn, where=where, source=source)}"
+            "CREATE OR REPLACE TEMP TABLE p_adresse AS SELECT * FROM sq.adresse"
+            " WHERE adresse_id IN (SELECT adresse_id FROM p_dpe)"
+        )
+        for table in dict.fromkeys(["dpe_adresse_brut", *(r.table for r in source.mapping.repeats)]):
+            narrowed[table] = f"p_{table}"
+            duck.execute(
+                f"CREATE OR REPLACE TEMP TABLE p_{table} AS SELECT * FROM sq.{table}"
+                " WHERE dpe_id IN (SELECT dpe_id FROM p_dpe)"
+            )
+
+        duck.execute(
+            "CREATE OR REPLACE TEMP TABLE wide AS"
+            f" {wide_select(conn, source=source, tables=narrowed)}"
         )
         n = duck.execute("SELECT COUNT(*) FROM wide").fetchone()[0]
         if not quiet:
