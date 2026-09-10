@@ -172,21 +172,30 @@ def load(scales: dict[str, int] | None = None) -> dict[str, Column]:
 def csv_header_to_key() -> dict[str, str]:
     """CSV headers are the schema's `label`, which is NOT always the `key`.
 
-    16 real columns differ, and two of them collide destructively: the header
-    `adresse_brut` carries the field whose key is `adresse_complete_brut`,
-    while the key `adresse_brut` is published under the header
-    `numero_voie_brut`. Reading a row by key therefore silently loads the wrong
-    values into the wrong columns -- not a missing value, a swapped one.
+    Eight columns differ as of 2026-09-10, and the labels are ADEME's to
+    change without notice. By then the export had renamed the headers of
+    `adresse_brut` and `adresse_complete_brut` to their own keys. The labels
+    vendored before that sent the first onto the second, so `adresse_brut`
+    was stored empty for every certificate loaded. `tests/test_csv_labels.py`
+    checks these labels against the header ADEME serves. See ADR-0023.
 
     The rename must be applied to the whole header row at once, never key by
-    key, or the collision resolves in the wrong direction.
+    key, or a collision resolves in the wrong direction.
     """
     return {(f.get("label") or f["key"]): f["key"] for f in _raw()}
 
 
 def rename_row(row: dict[str, str]) -> dict[str, str]:
     m = csv_header_to_key()
-    return {m.get(h, h): v for h, v in row.items()}
+    out = {m.get(h, h): v for h, v in row.items()}
+    # TRAP: two headers landing on one key is a column lost, not an error --
+    # the second silently overwrites the first. Refuse it, so a stale label
+    # stops the load on its first page. See ADR-0023.
+    if len(out) != len(row):
+        keys = [m.get(h, h) for h in row]
+        collided = sorted({k for k in keys if keys.count(k) > 1})
+        raise ValueError(f"CSV headers collide on {collided}: the vendored labels are stale")
+    return out
 
 
 def vocab_domains(cols: dict[str, Column]) -> dict[str, list[str]]:
