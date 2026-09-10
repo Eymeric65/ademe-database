@@ -11,6 +11,10 @@ dist
 test-results
 playwright-report
 
+# Staged from node_modules by scripts/stage-duckdb.mjs: 77 MB of engine that
+# does not belong in git. See ADR-0009.
+test/e2e/fixtures/vendor
+
 __pycache__
 .pytest_cache
 .venv

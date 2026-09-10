@@ -13,6 +13,11 @@ import { defineConfig, devices } from '@playwright/test'
  */
 const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:8787'
 
+// The Parquet lives on a different origin from the app, in the e2e harness as
+// in production. Serving it from the app's own origin would hide any CORS or
+// Range problem until the day it reached R2.
+const dataURL = process.env.VITE_DATA_BASE_URL ?? 'http://localhost:8788/v1'
+
 export default defineConfig({
   testDir: './test/e2e',
   fullyParallel: true,
@@ -24,10 +29,19 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  // Fails the run if the fixture server does not answer 206 to a Range request,
+  // which is the one way this whole suite could pass while testing nothing.
+  globalSetup: './test/e2e/global-setup.ts',
   ...(process.env.E2E_BASE_URL
     ? {}
     : {
-        webServer: {
+        webServer: [
+          {
+            command: `node scripts/serve-fixtures.mjs test/e2e/fixtures 8788`,
+            url: 'http://localhost:8788/v1/manifest.json',
+            reuseExistingServer: !process.env.CI,
+          },
+          {
           // --env preview, not the default env: AUTH_TEST_CREDENTIALS lives
           // there and nowhere else (ADR-0008), and sign-in.spec.ts cannot sign
           // anybody in without it. `wrangler dev` is local-only, so this binds
@@ -44,7 +58,9 @@ export default defineConfig({
           // races an empty database.
           url: 'http://localhost:8787/api/health',
           reuseExistingServer: !process.env.CI,
-          timeout: 120_000,
-        },
+          timeout: 180_000,
+          env: { VITE_DATA_BASE_URL: dataURL },
+          },
+        ],
       }),
 })
