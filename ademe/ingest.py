@@ -30,6 +30,7 @@ from ademe.mapping import (
 
 EPOCH = date(1970, 1, 1)
 MIN_FREE_BYTES = 1_500_000_000
+INT64_MIN, INT64_MAX = -(2**63), 2**63 - 1
 
 
 def to_days(raw: str) -> int | None:
@@ -52,6 +53,13 @@ def to_scaled(raw: str, scale: int) -> tuple[int | None, str | None]:
     scaled = d * scale
     if scaled != scaled.to_integral_value():
         return None, raw  # more precision than the declared scale holds
+    # TRAP: SQLite integers are 64 bits and nothing wider -- a larger one is an
+    # OverflowError at execute() time, not a truncation. ADEME publishes
+    # `hauteur_sous_plafond = 5.55555555555556e+181`, and that one certificate
+    # killed a 15-hour national ingest. Too large for the encoding is the same
+    # failure as too precise for it, so it takes the same exit.
+    if not (INT64_MIN <= scaled <= INT64_MAX):
+        return None, raw
     return int(scaled), None
 
 
