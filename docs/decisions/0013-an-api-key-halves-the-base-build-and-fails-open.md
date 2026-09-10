@@ -63,7 +63,19 @@ produces a run that is correct, silent, and twice as long as planned. Nothing su
 feature ships with the thing that does: `python -m ademe.api` downloads one page at the ingest's own
 page size and prints the measured kB/s against the two published budgets.
 
-The key stays out of the repository (`.env` is git-ignored) and out of Cloudflare. It authenticates
+### Where the key lives
+
+`.env` in the repository root, git-ignored, read by `ademe/config.py` at import. A key passed on the
+command line lands in shell history; a key exported from `~/.bashrc` lands in every process on the
+machine. A real environment variable still wins, so a one-off `ADEME_API_KEY=... uv run ...`
+overrides the file.
+
+`config.py` reads the file itself rather than delegating, because **`uv run` does not read `.env`**.
+It needs `--env-file .env` or `UV_ENV_FILE`, verified against uv 0.12.4, and forgetting either is
+silent in exactly the way the rest of this record is about: the ingest runs anonymously and takes
+twice as long, and nothing says so.
+
+The key stays out of the repository and out of Cloudflare. It authenticates
 a local Python process to a public open-data API; it is not an app-plane secret and must never be
 added to `wrangler.jsonc`, a Worker binding, or a GitHub Actions secret. ADR-0001's separation of the
 two planes is what makes that a rule rather than a preference: nothing in the app plane talks to
@@ -82,8 +94,9 @@ ADEME.
 
 ### Confirmation
 
-`tests/test_api_key.py`. Offline: the environment reaches the config, an empty variable reads as
-absent, and the config reaches the header. Live (`-m live`): the server's OpenAPI still declares
+`tests/test_api_key.py`. Offline: `.env` reaches the environment (and is read from the repo root,
+and does not override a variable already set), the environment reaches the config, an empty variable
+reads as absent, and the config reaches the header — four links, each of which fails silently. Live (`-m live`): the server's OpenAPI still declares
 `x-apiKey` — the one assertion that would catch a rename, since every request would go on returning
 200 — and, when `ADEME_API_KEY` is set, one real page must measure above the midpoint of the two
 published budgets. That last one skips without a key, because without a key there is nothing to

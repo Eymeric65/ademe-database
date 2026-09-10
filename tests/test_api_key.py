@@ -16,6 +16,7 @@ because a break in either is equally silent.
 from __future__ import annotations
 
 import importlib
+import os
 
 import pytest
 
@@ -43,6 +44,52 @@ def test_an_empty_variable_is_not_a_key(monkeypatch):
     a key of zero length -- which the server would ignore, anonymously."""
     monkeypatch.setenv("ADEME_API_KEY", "")
     assert importlib.reload(config).API_KEY is None
+
+
+def test_the_dot_env_reader_handles_a_real_file(monkeypatch, tmp_path):
+    """Comments, blanks and quotes, because a key pasted from a web page
+    arrives wrapped in whichever of them the page used."""
+    monkeypatch.delenv("ADEME_API_KEY", raising=False)
+    env = tmp_path / ".env"
+    env.write_text("# ADEME\n\nADEME_API_KEY='from-the-file'\nNOT_AN_ASSIGNMENT\n")
+    config._dotenv(env)
+    assert os.environ["ADEME_API_KEY"] == "from-the-file"
+
+
+def test_the_environment_still_beats_the_file(monkeypatch, tmp_path):
+    """A one-off `ADEME_API_KEY=... uv run ...` must override the file, or the
+    file becomes the only way to change the key."""
+    monkeypatch.setenv("ADEME_API_KEY", "from-the-shell")
+    env = tmp_path / ".env"
+    env.write_text("ADEME_API_KEY=from-the-file\n")
+    config._dotenv(env)
+    assert os.environ["ADEME_API_KEY"] == "from-the-shell"
+
+
+def test_a_missing_dot_env_is_not_an_error(tmp_path):
+    config._dotenv(tmp_path / "does-not-exist")
+
+
+def test_the_repo_root_dot_env_is_the_one_that_is_read(monkeypatch):
+    """The wiring, not the parser.
+
+    `uv run` ignores `.env` unless you remember `--env-file` -- verified
+    against uv 0.12.4, where a bare `uv run` reads nothing -- and forgetting it
+    is silent: the ingest runs anonymously and takes twice as long. So the
+    config reads the file itself, at import, and this is the assertion that it
+    reads it from the right place. A probe variable rather than the real one,
+    so nothing here can perturb a parallel worker's key.
+    """
+    env = config.REPO / ".env"
+    if env.exists():
+        pytest.skip("a real .env is present; refusing to overwrite it")
+    monkeypatch.delenv("ADEME_DOTENV_PROBE", raising=False)
+    env.write_text("ADEME_DOTENV_PROBE=reached\n")
+    try:
+        importlib.reload(config)
+    finally:
+        env.unlink()
+    assert os.environ.get("ADEME_DOTENV_PROBE") == "reached"
 
 
 @pytest.fixture(autouse=True)
