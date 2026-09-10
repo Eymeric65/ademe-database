@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:worker": "wrangler dev",
+    "dev:worker": "wrangler dev --env preview --var BETTER_AUTH_SECRET:local-development-only-not-a-real-secret",
     "build": "tsc --noEmit && vite build",
     "check": "tsc --noEmit && vitest run && npm run test:db && npm run db:check",
     "test": "vitest run",
