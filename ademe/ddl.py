@@ -222,6 +222,10 @@ def commune_key_columns(
 def indexes_ddl(source: Source = EXISTANT) -> list[str]:
     """Built by `finalise`, after the load: creating them up front would make
     every insert maintain a B-tree it does not need yet."""
+    cols = spec.load(source=source)
+    # The column as this source stores it: new housing has few enough BAN
+    # identifiers for them to be a vocabulary, `identifiant_ban_id` (ADR-0025).
+    ban = [dest_name(cols[s], d) for s, d in source.mapping.adresse.items() if d == "identifiant_ban"]
     return [
         f"CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe({source.mapping.key})",
         "CREATE INDEX IF NOT EXISTS ix_dpe_adresse ON dpe(adresse_id)",
@@ -230,7 +234,7 @@ def indexes_ddl(source: Source = EXISTANT) -> list[str]:
         # identifier disagree on the street text. Several `adresse` rows per
         # identifier is the designed behaviour; a UNIQUE index here fails on
         # the real data, and did.
-        "CREATE INDEX IF NOT EXISTS ix_adresse_ban ON adresse(identifiant_ban)",
+        *(f"CREATE INDEX IF NOT EXISTS ix_adresse_ban ON adresse({b})" for b in ban),
         "CREATE INDEX IF NOT EXISTS ix_adresse_commune ON adresse(commune_id)",
         # UNIQUE so `finalise` fails loudly if the loader ever wrote a true
         # duplicate; the load itself dedups through the Loader's cache.
