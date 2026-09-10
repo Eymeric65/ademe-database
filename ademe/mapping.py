@@ -297,6 +297,28 @@ NEUF_ABSENT = frozenset(
 )
 NEUF = EXISTANT.without(NEUF_ABSENT)
 
+# The tertiary DPE's one repeating group: up to three energies, each with its
+# use, consumption, cost and the year it was read. Its address and commune
+# columns are existing housing's. See ADR-0026.
+ENERGIE_TERTIAIRE = Repeat(
+    table="dpe_energie",
+    outer=(1, 2, 3),
+    columns={
+        "type_energie_n{i}": "type_energie",
+        "type_usage_energie_n{i}": "type_usage",
+        "conso_ef_energie_n{i}": "conso_ef",
+        "conso_ep_energie_n{i}": "conso_ep",
+        "frais_annuel_energie_n{i}": "frais_annuel",
+        "annee_releve_conso_energie_n{i}": "annee_releve",
+    },
+)
+TERTIAIRE = Mapping(
+    repeats=(ENERGIE_TERTIAIRE,),
+    commune=COMMUNE_COLUMNS,
+    adresse=ADRESSE_COLUMNS,
+    adresse_brut=ADRESSE_BRUT_COLUMNS,
+)
+
 
 def classify(source_columns: list[str], mapping: Mapping = EXISTANT) -> Coverage:
     """Assign every source column to exactly one destination."""
