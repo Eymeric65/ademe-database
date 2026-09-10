@@ -324,6 +324,96 @@ TERTIAIRE = Mapping(
     adresse_brut=ADRESSE_BRUT_COLUMNS,
 )
 
+# The energy audits: one row per audit STEP, keyed on `id_etape` (unique over
+# all 3.2M rows; `n_audit` repeats across an audit's steps). Their BAN columns
+# are renamed and their four repeating groups are their own; each source has
+# its own database, so the child tables keep existing housing's names. See
+# ADR-0031.
+INSTALLATION_CHAUFFAGE_AUDIT = Repeat(
+    table="dpe_installation_chauffage",
+    outer=(1, 2),
+    columns={
+        "type_installation_chauffage_n{i}": "type_installation",
+        "type_emetteur_installation_chauffage_n{i}": "type_emetteur",
+        "configuration_installation_chauffage_n{i}": "configuration",
+        "etat_installation_chauffage_n{i}": "etat",
+        "conso_ef_installation_chauffage_n{i}": "conso_ef",
+        "surface_chauffee_installation_chauffage_n{i}": "surface_chauffee",
+        "facteur_couverture_solaire_installation_chauffage_n{i}": "facteur_couverture_solaire",
+        "facteur_couverture_solaire_installation_chauffage_saisi_n{i}": "facteur_couverture_solaire_saisi",
+    },
+)
+GENERATEUR_CHAUFFAGE_AUDIT = Repeat(
+    table="dpe_generateur_chauffage",
+    outer=(1, 2),
+    inner=(1, 2),
+    columns={
+        "type_generateur_n{g}_installation_chauffage_n{i}": "type_generateur",
+        "type_energie_generateur_n{g}_installation_chauffage_n{i}": "type_energie",
+        "usage_generateur_n{g}_installation_chauffage_n{i}": "usage",
+        "conso_ef_generateur_n{g}_installation_chauffage_n{i}": "conso_ef",
+    },
+)
+BILAN_ENERGIE_AUDIT = Repeat(
+    table="dpe_bilan_energie",
+    outer=(1, 2, 3),
+    columns={
+        "type_energie_n{i}": "type_energie",
+        "conso_ef_5_usages_energie_n{i}": "conso_5_usages_ef",
+        "conso_ef_chauffage_energie_n{i}": "conso_chauffage_ef",
+        "conso_ef_ecs_energie_n{i}": "conso_ecs_ef",
+        "cout_5_usages_energie_n{i}": "cout_5_usages",
+        "cout_chauffage_energie_n{i}": "cout_chauffage",
+        "cout_ecs_energie_n{i}": "cout_ecs",
+        "emission_ges_5_usages_energie_n{i}": "emission_ges_5_usages",
+        "emission_ges_chauffage_energie_n{i}": "emission_ges_chauffage",
+        "emission_ges_ecs_energie_n{i}": "emission_ges_ecs",
+    },
+)
+GENERATEUR_ECS_AUDIT = Repeat(
+    table="dpe_generateur_ecs",
+    outer=(1,),
+    columns={
+        "type_generateur_ecs_n{i}": "type_generateur",
+        "type_energie_generateur_ecs_n{i}": "type_energie",
+        "usage_generateur_ecs_n{i}": "usage",
+        "volume_stockage_generateur_ecs_n{i}": "volume_stockage",
+        "cop_generateur_ecs_n{i}": "cop",
+        "conso_ef_generateur_ecs_n{i}": "conso_ef",
+        "date_installation_generateur_ecs_n{i}": "date_installation",
+    },
+)
+AUDIT = Mapping(
+    repeats=(
+        INSTALLATION_CHAUFFAGE_AUDIT,
+        GENERATEUR_CHAUFFAGE_AUDIT,
+        BILAN_ENERGIE_AUDIT,
+        GENERATEUR_ECS_AUDIT,
+    ),
+    commune={
+        "code_insee_ban": "code_insee",
+        "nom_commune_ban": "nom",
+        "n_departement_ban": "code_departement",
+        "n_region_ban": "code_region",
+    },
+    adresse={
+        "identifiant_ban": "identifiant_ban",
+        "adresse_ban": "adresse",
+        "n_voie_ban": "numero_voie",
+        "nom_voie_ban": "nom_rue",
+        "code_postal_ban": "code_postal",
+    },
+    adresse_brut={
+        "adresse_brut": "adresse_brut",
+        "n_et_nom_voie_brut": "n_et_nom_voie_brut",
+        "code_postal_brut": "code_postal_brut",
+        "nom_commune_brut": "nom_commune_brut",
+    },
+    key="id_etape",
+    departement="n_departement_ban",
+    modified="date_derniere_modification",
+)
+
 
 def classify(source_columns: list[str], mapping: Mapping = EXISTANT) -> Coverage:
     """Assign every source column to exactly one destination."""
