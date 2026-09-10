@@ -28,7 +28,7 @@ from pathlib import Path
 import duckdb
 
 from ademe import db, geo
-from ademe.config import DEFAULT_DB, EXISTANT, Source
+from ademe.config import DEFAULT_DB, EXISTANT, UNGEOCODED, Source
 
 VERSION = "v1"
 
@@ -227,7 +227,7 @@ def _dept_join(conn, alias_c: str = "c", alias_v: str = "v") -> str:
 
 def _departements(conn) -> list[str]:
     _, column, domain = _dept_source(conn)
-    return [
+    codes = [
         r[0]
         for r in conn.execute(
             f"SELECT DISTINCT v.code FROM commune c"
@@ -235,6 +235,17 @@ def _departements(conn) -> list[str]:
             " WHERE v.code IS NOT NULL AND v.code != '' ORDER BY v.code"
         )
     ]
+    # A certificate ADEME could not geocode has no commune departement. It is
+    # published in a partition of its own, not in none. See ADR-0024.
+    if conn.execute(
+        "SELECT 1 FROM dpe d"
+        " LEFT JOIN adresse a ON a.adresse_id = d.adresse_id"
+        " LEFT JOIN commune c ON c.commune_id = a.commune_id"
+        f" LEFT JOIN vocab_{domain} v ON v.id = c.{column}"
+        " WHERE v.code IS NULL OR v.code = '' LIMIT 1"
+    ).fetchone():
+        codes.append(UNGEOCODED)
+    return codes
 
 
 def _geopoint_rows(conn, codes: list[str]) -> list[tuple[int, float | None, float | None]]:
@@ -310,13 +321,22 @@ def export(
     for part, part_codes in sorted(by_partition.items()):
         quoted = ", ".join(f"'{c}'" for c in part_codes)
         _, dept_col, dept_domain = _dept_source(conn)
-        where = (
-            "d.dpe_id IN (SELECT d2.dpe_id FROM sq.dpe d2"
-            " JOIN sq.adresse a2 ON a2.adresse_id = d2.adresse_id"
-            " JOIN sq.commune c2 ON c2.commune_id = a2.commune_id"
-            f" JOIN sq.vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
-            f" WHERE v2.code IN ({quoted}))"
-        )
+        if part == UNGEOCODED:
+            where = (
+                "d.dpe_id IN (SELECT d2.dpe_id FROM sq.dpe d2"
+                " LEFT JOIN sq.adresse a2 ON a2.adresse_id = d2.adresse_id"
+                " LEFT JOIN sq.commune c2 ON c2.commune_id = a2.commune_id"
+                f" LEFT JOIN sq.vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
+                " WHERE v2.code IS NULL OR v2.code = '')"
+            )
+        else:
+            where = (
+                "d.dpe_id IN (SELECT d2.dpe_id FROM sq.dpe d2"
+                " JOIN sq.adresse a2 ON a2.adresse_id = d2.adresse_id"
+                " JOIN sq.commune c2 ON c2.commune_id = a2.commune_id"
+                f" JOIN sq.vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
+                f" WHERE v2.code IN ({quoted}))"
+            )
 
         duck.execute("CREATE OR REPLACE TEMP TABLE geopoint (dpe_id BIGINT, lat DOUBLE, lon DOUBLE)")
         rows = _geopoint_rows(conn, part_codes)

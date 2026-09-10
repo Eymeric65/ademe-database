@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import httpx
 
 from ademe import spec
-from ademe.config import API, API_KEY, EXISTANT, PAGE_SIZE, Source
+from ademe.config import API, API_KEY, EXISTANT, PAGE_SIZE, UNGEOCODED, Source
 
 _NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="?next"?', re.I)
 
@@ -64,6 +64,8 @@ def _get(client: httpx.Client, url: str, params: dict | None = None) -> httpx.Re
 
 
 def _departement_qs(code: str) -> str:
+    if code == UNGEOCODED:
+        return "NOT _exists_:code_departement_ban"
     return f'code_departement_ban:"{code}"'
 
 

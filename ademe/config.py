@@ -92,6 +92,12 @@ API_KEY = os.environ.get("ADEME_API_KEY") or None
 # the limit) and cost more to re-fetch on a retry.
 PAGE_SIZE = 10_000
 
+# ADEME could not geocode some certificates, which then carry no
+# `code_departement_ban`, so no departement query returns them. They are one
+# pseudo-departement from the ADEME query to the published partition.
+# See ADR-0024.
+UNGEOCODED = "NG"
+
 # Set before the first CREATE TABLE or it is silently ignored. 16384 cuts leaf
 # page slack from ~7% to ~2.3% at this row width.
 SQLITE_PAGE_SIZE = 16384
