@@ -17,7 +17,7 @@ import argparse
 from pathlib import Path
 
 from ademe import api, db, spec
-from ademe.config import DEFAULT_DB, EXISTANT, Source
+from ademe.config import EXISTANT, SOURCES, Source
 
 
 def load_domain(client, columns: list[str], source: Source = EXISTANT) -> set[str]:
@@ -56,9 +56,11 @@ def build(path: Path, *, verbose: bool = True, source: Source = EXISTANT) -> dic
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db-path", type=Path, default=DEFAULT_DB)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument("--db-path", type=Path, help="default: the source's own database")
     args = ap.parse_args(argv)
-    counts = build(args.db_path)
+    source = SOURCES[args.source]
+    counts = build(args.db_path or source.db_path, source=source)
     filled = sum(1 for n in counts.values() if n)
     print(
         f"\n{len(counts)} vocabularies: {filled} pre-built from /values, "

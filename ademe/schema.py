@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ademe import db, ddl, spec
-from ademe.config import DEFAULT_DB, EXISTANT, LICENCE, Source
+from ademe.config import EXISTANT, LICENCE, SOURCES, Source
 
 
 def build(
@@ -86,10 +86,13 @@ def report(path: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db-path", type=Path, default=DEFAULT_DB)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument("--db-path", type=Path, help="default: the source's own database")
     args = ap.parse_args(argv)
-    build(args.db_path)
-    report(args.db_path)
+    source = SOURCES[args.source]
+    db_path = args.db_path or source.db_path
+    build(db_path, source=source)
+    report(db_path)
     return 0
 
 

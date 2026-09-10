@@ -24,7 +24,7 @@ from pathlib import Path
 import httpx
 
 from ademe import api, db, spec
-from ademe.config import DEFAULT_DB, EXISTANT, Source
+from ademe.config import EXISTANT, SOURCES, Source
 
 # The Lambert-93 coordinates carry up to 6 decimals (x*10^6 is ~1e12, well
 # inside int64). Past this a column is stored as TEXT -- scale 0 is the
@@ -116,19 +116,21 @@ def store(path: Path, scales: dict[str, int]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db-path", type=Path, default=DEFAULT_DB)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument("--db-path", type=Path, help="default: the source's own database")
     ap.add_argument("--sample", type=int, default=20_000)
     ap.add_argument("--page-size", type=int, default=2_000)
     args = ap.parse_args(argv)
+    source = SOURCES[args.source]
 
-    cols = spec.load()
+    cols = spec.load(source=source)
     numeric = spec.numeric_columns(cols)
     client = api.client()
     print(f"sampling {args.sample:,} random rows for {len(numeric)} numeric columns...")
     scales, bad, seen = discover(
-        client, numeric, sample=args.sample, page_size=args.page_size
+        client, numeric, sample=args.sample, page_size=args.page_size, source=source
     )
-    store(args.db_path, scales)
+    store(args.db_path or source.db_path, scales)
 
     hist: dict[int, int] = {}
     for s in scales.values():
