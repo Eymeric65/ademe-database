@@ -1,0 +1,68 @@
+name: ETL weekly delta
+
+# Manual only for now. The cron arrives with PR 9, once deletions are handled:
+# the delta cannot see a certificate that LEFT the dataset, so scheduling this
+# before reconciliation exists would let the published files drift upwards
+# forever, quietly. See ADR-0007.
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Override the manifest high_water (YYYY-MM-DD)'
+        required: false
+
+# Never cancel a run in flight: it is mid-way through rewriting partitions on
+# R2, and a half-uploaded partition with a swapped manifest is the one state
+# this design exists to avoid.
+concurrency:
+  group: etl-weekly
+  cancel-in-progress: false
+
+jobs:
+  delta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      DATA_BASE_URL: https://data.recherche-maison.com/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      - name: Fetch and merge
+        run: |
+          uv run python -m ademe.delta \
+            --base-url "$DATA_BASE_URL" \
+            --out out \
+            ${{ github.event.inputs.since && format('--since {0}', github.event.inputs.since) || '' }}
+
+      - name: Check for a sharp departure
+        run: uv run python scripts/check_delta.py --out out --base-url "$DATA_BASE_URL"
+
+      # Data first, manifest LAST. A reader that fetches the manifest and then
+      # the files it names must never be pointed at a file that is not there
+      # yet; the reverse order is a window in which the app is broken.
+      - name: Upload partitions
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          # rclone rather than `wrangler r2 object put`, which caps well below
+          # the ~240 MB Paris wide file.
+          sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
+          rclone copy out/v1/search r2:ademe-dpe/v1/search --checksum
+          rclone copy out/v1/dpe    r2:ademe-dpe/v1/dpe    --checksum
+          rclone copy out/v1/index  r2:ademe-dpe/v1/index  --checksum
+          rclone copyto out/v1/manifest.json r2:ademe-dpe/v1/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delta-manifest
+          path: out/v1/manifest.json
+          retention-days: 30
