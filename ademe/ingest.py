@@ -19,7 +19,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from ademe import api, db, ddl, spec
-from ademe.config import DEFAULT_DB, EXISTANT, PAGE_SIZE, UNGEOCODED, Source
+from ademe.config import EXISTANT, PAGE_SIZE, SOURCES, UNGEOCODED, Source
 from ademe.mapping import check_coverage
 
 EPOCH = date(1970, 1, 1)
@@ -426,10 +426,8 @@ class Loader:
             )
 
 
-def departements(client) -> list[str]:
-    from ademe.config import API
-
-    r = api._get(client, f"{API}/values/code_departement_ban", {"size": 200})
+def departements(client, source: Source = EXISTANT) -> list[str]:
+    r = api._get(client, f"{source.api}/values/code_departement_ban", {"size": 200})
     # ADEME's list is of the departements that exist; NG is the certificates
     # that have none (ADR-0024).
     return sorted(v for v in r.json() if v) + [UNGEOCODED]
@@ -446,7 +444,7 @@ def ingest_departement(conn, loader: Loader, client, code: str, *, quiet=False) 
             print(f"  {code}: already complete ({led['rows_loaded']:,} rows)")
         return 0
 
-    expected = api.total(client, departement=code)
+    expected = api.total(client, departement=code, source=loader.source)
     start_url = led["next_cursor"] if led else None
     loaded = led["rows_loaded"] if led else 0
     if not led:
@@ -459,7 +457,7 @@ def ingest_departement(conn, loader: Loader, client, code: str, *, quiet=False) 
 
     loader.adresse.clear()  # addresses do not recur across departements
     t0 = time.time()
-    for p in api.iter_pages(client, departement=code, start_url=start_url):
+    for p in api.iter_pages(client, departement=code, start_url=start_url, source=loader.source):
         with db.transaction(conn):
             loaded += loader.load_page(p.rows)
             conn.execute(
@@ -489,7 +487,8 @@ def ingest_departement(conn, loader: Loader, client, code: str, *, quiet=False) 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db-path", type=Path, default=DEFAULT_DB)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument("--db-path", type=Path, help="default: the source's own database")
     ap.add_argument("--dept", action="append", help="repeatable; omit with --all")
     ap.add_argument("--all", action="store_true")
     ap.add_argument("--min-free", type=int, default=MIN_FREE_BYTES)
@@ -498,9 +497,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.dept and not args.all:
         ap.error("give --dept CODE (repeatable) or --all")
+    source = SOURCES[args.source]
+    db_path = args.db_path or source.db_path
 
     client = api.client()
-    conn = db.connect(args.db_path, bulk=True)
+    conn = db.connect(db_path, bulk=True)
     cols = {}
     meta = conn.execute(
         "SELECT column_name, scale FROM column_meta WHERE scale != 1"
@@ -513,14 +514,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
     scales = {r["column_name"]: r["scale"] for r in meta}
-    cols = {k: v for k, v in spec.load(scales).items() if k not in EXISTANT.mapping.internal}
+    cols = {
+        k: v for k, v in spec.load(scales, source=source).items() if k not in source.mapping.internal
+    }
 
-    todo = args.dept or departements(client)
-    loader = Loader(conn, cols)
+    todo = args.dept or departements(client, source)
+    loader = Loader(conn, cols, source)
     total = 0
     try:
         for code in todo:
-            free = db.free_bytes(args.db_path)
+            free = db.free_bytes(db_path)
             if free < args.min_free:
                 print(
                     f"\nstopping before {code}: {free / 1e9:.1f} GB free, "

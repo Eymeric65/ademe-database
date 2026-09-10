@@ -21,7 +21,7 @@ import argparse
 from pathlib import Path
 
 from ademe import db, ddl
-from ademe.config import DEFAULT_DB, EXISTANT, Source
+from ademe.config import EXISTANT, SOURCES, Source
 
 
 class Quarantined(RuntimeError):
@@ -135,7 +135,8 @@ def finalise(
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db-path", type=Path, default=DEFAULT_DB)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument("--db-path", type=Path, help="default: the source's own database")
     ap.add_argument(
         "--partial",
         action="store_true",
@@ -148,18 +149,21 @@ def main(argv: list[str] | None = None) -> int:
         help="proceed with this many quarantined certificates in bad_row",
     )
     args = ap.parse_args(argv)
+    source = SOURCES[args.source]
+    db_path = args.db_path or source.db_path
 
-    conn = db.connect(args.db_path)
+    conn = db.connect(db_path)
     try:
         rows = finalise(
             conn,
             partial=args.partial,
             quiet=False,
             allow_bad_rows=args.allow_bad_rows,
+            source=source,
         )
     finally:
         conn.close()
-    print(f"finalised {args.db_path}: {rows:,} certificates")
+    print(f"finalised {db_path}: {rows:,} certificates")
     return 0
 
 

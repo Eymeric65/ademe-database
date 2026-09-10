@@ -28,7 +28,7 @@ from pathlib import Path
 import duckdb
 
 from ademe import db, geo
-from ademe.config import DEFAULT_DB, EXISTANT, UNGEOCODED, Source
+from ademe.config import EXISTANT, SOURCES, UNGEOCODED, Source
 
 VERSION = "v1"
 
@@ -529,16 +529,18 @@ def read_rows(out_dir: Path, numeros: list[str]) -> dict[str, dict[str, str]]:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db-path", type=Path, default=DEFAULT_DB)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument("--db-path", type=Path, help="default: the source's own database")
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--dept", action="append", help="repeatable; omit for all")
     args = ap.parse_args(argv)
+    source = SOURCES[args.source]
 
-    m = export(args.db_path, args.out, args.dept, quiet=False)
+    m = export(args.db_path or source.db_path, args.out, args.dept, quiet=False, source=source)
     total = sum(p["rows"] for p in m["partitions"])
     print(
         f"wrote {len(m['partitions'])} partition(s), {total:,} certificates"
-        f" to {args.out / VERSION}"
+        f" to {args.out / VERSION / source.subdir}"
     )
     return 0
 
