@@ -149,13 +149,13 @@ def exported(tmp_path, monkeypatch):
 
     out = tmp_path / "out"
     manifest = export_parquet.export(path, out)
-    yield conn, out / export_parquet.VERSION, manifest, (column, violating)
+    yield conn, out / export_parquet.VERSION, manifest, (column, violating), path
     conn.close()
 
 
 def test_every_column_of_every_row_survives_the_export(exported):
     """(a) The losslessness claim, for the files the browser reads."""
-    conn, root, _manifest, _ = exported
+    conn, root, _manifest, _, _path = exported
     from ademe import reconstruct
 
     numeric = {
@@ -185,7 +185,7 @@ def test_search_file_has_exactly_the_declared_columns_and_is_sorted(exported):
     """(b) The search index is the file every query touches; a wrong column set
     is a silent full-file read, and a wrong sort order defeats the row-group
     statistics the whole layout is built on."""
-    _conn, root, _manifest, _ = exported
+    _conn, root, _manifest, _, _path = exported
     d = duckdb.connect()
     path = root / "search" / "dept=09" / "part-0000.parquet"
 
@@ -215,9 +215,39 @@ def test_search_file_has_exactly_the_declared_columns_and_is_sorted(exported):
     assert mins == sorted(mins), f"row-group minima are not monotonic: {mins}"
 
 
+def test_the_compression_level_actually_reaches_the_files(exported, tmp_path, monkeypatch):
+    """Every byte here is a byte the browser pulls over an HTTP range request.
+
+    The level is not recorded in Parquet metadata, so size is the only place
+    it is observable at all -- which makes the comparison easy to get wrong.
+    An earlier version of this test rewrote the shipped file with DuckDB at the
+    default level and compared: it passed with the change reverted, because a
+    round-trip through DuckDB costs ~194 B of metadata whatever the level, and
+    that artefact was a quarter of the gap it claimed to be measuring.
+
+    So both sides go through `export()` itself, on the same database. The only
+    difference is the constant, and the artefact cancels exactly. See ADR-0016.
+    """
+    _conn, root, _manifest, _violation, path = exported
+    shipped = (root / "dpe" / "dept=09" / "part-0000.parquet").stat().st_size
+
+    monkeypatch.setattr(export_parquet, "COMPRESSION", "COMPRESSION zstd")
+    other = tmp_path / "at-duckdbs-default"
+    export_parquet.export(path, other)
+    default = (
+        other / export_parquet.VERSION / "dpe" / "dept=09" / "part-0000.parquet"
+    ).stat().st_size
+
+    assert shipped < default, (
+        f"{shipped:,} B shipped against {default:,} B at DuckDB's default zstd "
+        "level, from the same rows through the same export -- COMPRESSION_LEVEL "
+        "is not reaching the COPY statement"
+    )
+
+
 def test_manifest_counts_match_the_database(exported):
     """(c)"""
-    conn, _root, manifest, _ = exported
+    conn, _root, manifest, _, _path = exported
     by_part = {p["dept"]: p["rows"] for p in manifest["partitions"]}
     assert set(by_part) == {"09", "DOM"}, by_part
     assert sum(by_part.values()) == conn.execute("SELECT COUNT(*) FROM dpe").fetchone()[0]
@@ -232,7 +262,7 @@ def test_a_value_too_precise_to_scale_comes_back_verbatim(exported):
     If the export dropped that copy, the published row would carry the
     ROUNDED number and nothing would say so.
     """
-    conn, root, _manifest, (column, raw) = exported
+    conn, root, _manifest, (column, raw), _path = exported
     assert conn.execute("SELECT COUNT(*) FROM scale_violation").fetchone()[0] > 0
 
     got = export_parquet.read_rows(root, ["2409E9000003"])["2409E9000003"]
@@ -242,7 +272,7 @@ def test_a_value_too_precise_to_scale_comes_back_verbatim(exported):
 def test_numero_exceptions_lists_what_the_substring_shortcut_would_miss(exported):
     """PR11's detail view finds a partition from numero_dpe[2:4]. Anything that
     rule gets wrong has to be listed, or that certificate becomes unreachable."""
-    _conn, root, _manifest, _ = exported
+    _conn, root, _manifest, _, _path = exported
     d = duckdb.connect()
     rows = d.execute(
         f"SELECT numero_dpe, dept FROM read_parquet('{root}/index/numero-exceptions.parquet')"

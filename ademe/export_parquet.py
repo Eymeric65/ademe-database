@@ -33,6 +33,12 @@ from ademe.mapping import REPEATS
 
 VERSION = "v1"
 
+# zstd, and not at DuckDB's default level 3. Measured on the real departement
+# 09 export -- 31 157 certificates, 226 columns -- level 9 is 6.4% smaller for
+# an extra tenth of a second a partition. Every byte here is a byte the browser
+# pulls over an HTTP range request. See ADR-0016.
+COMPRESSION = "COMPRESSION zstd, COMPRESSION_LEVEL 9"
+
 # One row group is one detail read: a few MB, so a point lookup pulls one row
 # group of one partition rather than a whole file.
 DPE_ROW_GROUP = 10_000
@@ -311,13 +317,13 @@ def export(
 
         duck.execute(
             f"COPY (SELECT * FROM wide ORDER BY numero_dpe) TO '{dpe_path}'"
-            f" (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {DPE_ROW_GROUP})"
+            f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {DPE_ROW_GROUP})"
         )
         cols = ", ".join(f'"{c}"' for c in SEARCH_COLUMNS)
         order = ", ".join(f'"{c}"' for c in SEARCH_SORT)
         duck.execute(
             f"COPY (SELECT {cols} FROM wide ORDER BY {order}) TO '{search_path}'"
-            f" (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {SEARCH_ROW_GROUP})"
+            f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {SEARCH_ROW_GROUP})"
         )
 
         # A numero whose embedded departement disagrees with its partition
@@ -354,7 +360,7 @@ def export(
         duck.executemany("INSERT INTO exc VALUES (?, ?)", exceptions)
     duck.execute(
         f"COPY (SELECT * FROM exc ORDER BY numero_dpe) TO"
-        f" '{index / 'numero-exceptions.parquet'}' (FORMAT parquet, COMPRESSION zstd)"
+        f" '{index / 'numero-exceptions.parquet'}' (FORMAT parquet, {COMPRESSION})"
     )
 
     # Values the declared scale could not hold are stored verbatim in SQLite;
@@ -372,7 +378,7 @@ def export(
         duck.executemany("INSERT INTO viol VALUES (?, ?, ?)", [tuple(r) for r in viol])
     duck.execute(
         f"COPY (SELECT * FROM viol) TO '{index / 'scale-violation.parquet'}'"
-        " (FORMAT parquet, COMPRESSION zstd)"
+        f" (FORMAT parquet, {COMPRESSION})"
     )
 
     manifest = write_manifest(conn, root, partitions)
