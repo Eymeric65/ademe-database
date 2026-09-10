@@ -4,6 +4,16 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>DPE — recherche-maison</title>
+    <!-- The display face is on the first heading of every screen, so it is
+         worth one preload; @font-face alone would not fetch it until the CSS
+         had parsed and the text had been laid out once in the fallback. -->
+    <link
+      rel="preload"
+      href="/fonts/fraunces-roman-latin.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
   </head>
   <body>
     <div id="root"></div>
