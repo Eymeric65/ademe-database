@@ -1,5 +1,6 @@
 /**
- * DuckDB-WASM, reading Parquet straight off the data domain. See ADR-0009.
+ * DuckDB-WASM, reading Parquet through the Worker's gated /data route.
+ * See ADR-0012, which supersedes ADR-0009.
  *
  * The engine is initialised on the FIRST SEARCH, never on first paint: the
  * bundle is several megabytes and somebody who lands on the page and leaves
@@ -11,24 +12,40 @@ import eh_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-eh.worker.js?url'
 import mvp_worker from '@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url'
 import type { QuerySpec } from '../search/spec'
 
-const BASE = (import.meta.env.VITE_DATA_BASE_URL as string | undefined) ?? '/data/v1'
+/**
+ * Absolute, always.
+ *
+ * TRAP: DuckDB resolves a path that is not a URL against its own virtual
+ * filesystem, so `/data/v1/search/...` -- correct for fetch, same-origin since
+ * ADR-0012 -- comes back as `IO Error: No files found that match the pattern`,
+ * naming a path that plainly exists. It has to be `https://host/data/v1`.
+ */
+const BASE = new URL(
+  (import.meta.env.VITE_DATA_BASE_URL as string | undefined) ?? '/data/v1',
+  window.location.href,
+).href.replace(/\/+$/, '')
 
 /**
- * The WASM binaries come from the DATA origin, not from the app's own assets.
+ * The WASM binaries come from the bucket, not from the app's own assets.
  *
  * Not a preference: Cloudflare Workers Assets refuses any file over 25 MB and
  * these are 36 MB (eh) and 41 MB (mvp). `wrangler dev` fails the build outright
  * with "Asset too large".
  *
- * The data domain rather than a public CDN because the search screen ALREADY
- * cannot work without the data domain -- it is where the Parquet lives. Putting
- * the engine there adds no new point of failure, while jsDelivr would add a
- * second, independent one. See ADR-0009.
+ * TRAP: derived by dropping the version segment off BASE, not from BASE's
+ * ORIGIN. Since ADR-0012 the data is same-origin with the app, so the origin
+ * form resolved to /vendor/duckdb -- an assets path, which is the 25 MB refusal
+ * above, reached again by a different route.
+ *
+ * The engine sits beside the data rather than on a public CDN because the
+ * search screen already cannot work without the bucket; jsDelivr would add a
+ * second, independent point of failure. Unlike the data it is NOT gated: it has
+ * to load before the app can render the screen that asks somebody to sign in.
  *
  * The worker JS stays in the app bundle: `new Worker()` cannot load a
  * cross-origin script, whereas fetching the module cross-origin is fine.
  */
-const VENDOR = `${new URL(BASE, window.location.href).origin}/vendor/duckdb`
+const VENDOR = `${BASE.replace(/\/v1\/?$/, '')}/vendor/duckdb`
 
 export type ColumnMeta = { encoding: string; scale: number; destination: string }
 

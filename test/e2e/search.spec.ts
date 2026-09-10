@@ -1,7 +1,12 @@
 import { expect, test } from '@playwright/test'
+import { signUpViaApi, uniqueEmail } from './helpers'
 
 /**
  * The product's whole reason to exist, through the browser.
+ *
+ * Every test signs in first. Since ADR-0012 the search form is not rendered
+ * without a session and the Parquet answers 401 without one, so a signed-out
+ * search would be testing the gate rather than the search.
  *
  * The fixture is 800 real certificates across départements 09 and 48, exported
  * by ademe/export_parquet.py and served from a second origin with Range support
@@ -22,6 +27,7 @@ const TARGET = {
 }
 
 test('finds a certificate from the facts a listing publishes', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search'))
   await page.goto('/')
 
   await page.getByLabel('Code postal').fill(TARGET.codePostal)
@@ -40,6 +46,7 @@ test('one letter of difference excludes it', async ({ page }) => {
    * returned every row in the partition would pass just as well -- the address
    * would still be on the page.
    */
+  await signUpViaApi(page, uniqueEmail('search-excl'))
   await page.goto('/')
 
   await page.getByLabel('Code postal').fill(TARGET.codePostal)
@@ -59,6 +66,7 @@ test('one letter of difference excludes it', async ({ page }) => {
 })
 
 test('a result links to the map at real coordinates', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-map'))
   await page.goto('/')
 
   await page.getByLabel('Code postal').fill(TARGET.codePostal)

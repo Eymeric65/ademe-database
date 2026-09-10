@@ -13,14 +13,26 @@ import { defineConfig, devices } from '@playwright/test'
  */
 const baseURL = process.env.E2E_BASE_URL ?? 'http://localhost:8787'
 
-// The Parquet lives on a different origin from the app, in the e2e harness as
-// in production. Serving it from the app's own origin would hide any CORS or
-// Range problem until the day it reached R2.
-const dataURL = process.env.VITE_DATA_BASE_URL ?? 'http://localhost:8788/v1'
+// The Parquet is served BY the Worker now, out of its R2 binding and behind the
+// route gate (ADR-0012), so there is no second origin to stand up. The local
+// bucket is filled by scripts/seed-r2.mjs in `pretest:e2e`.
 
 export default defineConfig({
   testDir: './test/e2e',
+  // TRAP: the DuckDB assertions below ask for 60s, which the 30s default test
+  // timeout silently cuts off -- the per-expect budget cannot exceed the test's.
+  // Warm, the engine loads in seconds and nothing shows; cold, the first run
+  // pulls 77 MB of wasm through the Worker's R2 binding and every search test
+  // dies at 30s. CI is always cold.
+  timeout: 90_000,
   fullyParallel: true,
+  // TRAP: one `wrangler dev` serves the 77 MB DuckDB engine to every browser
+  // context. Concurrently, its proxy drops connections mid-range with "Network
+  // connection lost." and the failure is not confined to the search tests --
+  // the smoke test goes down with them. Two workers only widened the window:
+  // it failed 1 cold run in 3. One is the number that holds, and it costs
+  // about ten seconds because the run was never CPU-bound.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['html'], ['list']] : 'list',
@@ -29,18 +41,13 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  // Fails the run if the fixture server does not answer 206 to a Range request,
-  // which is the one way this whole suite could pass while testing nothing.
+  // Fails the run if the Worker does not answer 206 to a Range request, which
+  // is the one way this whole suite could pass while testing nothing.
   globalSetup: './test/e2e/global-setup.ts',
   ...(process.env.E2E_BASE_URL
     ? {}
     : {
         webServer: [
-          {
-            command: `node scripts/serve-fixtures.mjs test/e2e/fixtures 8788`,
-            url: 'http://localhost:8788/v1/manifest.json',
-            reuseExistingServer: !process.env.CI,
-          },
           {
           // --env preview, not the default env: AUTH_TEST_CREDENTIALS lives
           // there and nowhere else (ADR-0008), and sign-in.spec.ts cannot sign
@@ -59,7 +66,6 @@ export default defineConfig({
           url: 'http://localhost:8787/api/health',
           reuseExistingServer: !process.env.CI,
           timeout: 180_000,
-          env: { VITE_DATA_BASE_URL: dataURL },
           },
         ],
       }),
