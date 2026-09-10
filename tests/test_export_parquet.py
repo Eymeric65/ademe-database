@@ -8,6 +8,7 @@ a vocabulary join can quietly drop a value.
 
 from __future__ import annotations
 
+import json
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -153,6 +154,135 @@ def exported(tmp_path, monkeypatch):
     manifest = export_parquet.export(path, out)
     yield conn, out / export_parquet.VERSION, manifest, (column, violating), path
     conn.close()
+
+
+class _Profiled:
+    """A DuckDB connection that totals the rows its SQLite scans pull in.
+
+    DuckDB writes each statement's profile to one JSON file; after every
+    statement this reads it back and adds up the rows each SQLITE_SCAN emitted
+    (`operator_cardinality`) -- everything it pulled out of SQLite, since the
+    scanner filters nothing. Not `operator_rows_scanned`: that stays 0 for a
+    WITHOUT ROWID table, which every child table is, and an earlier version of
+    this test passed on the code it exists to catch because of it. Counted,
+    not timed: a clock in a test is a flake."""
+
+    def __init__(self, real, profile):
+        self.real, self.profile, self.sqlite_rows, self.one_at_a_time = real, profile, 0, 0
+        real.execute("PRAGMA enable_profiling = 'json'")
+        real.execute(f"PRAGMA profiling_output = '{profile}'")
+
+    def executemany(self, sql, rows):
+        rows = list(rows)
+        self.one_at_a_time += len(rows)
+        return self.real.executemany(sql, rows)
+
+    def execute(self, *args, **kwargs):
+        self.profile.unlink(missing_ok=True)
+        got = self.real.execute(*args, **kwargs)
+        if self.profile.exists():
+            stack = [json.loads(self.profile.read_text())]
+            while stack:
+                node = stack.pop()
+                if node.get("operator_name") == "SQLITE_SCAN":
+                    self.sqlite_rows += node.get("operator_cardinality", 0)
+                stack.extend(node.get("children", []))
+        return got
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+
+def test_a_partitions_export_reads_from_sqlite_only_its_own_rows(tmp_path, monkeypatch):
+    """Narrowing on DuckDB's side kept memory to the partition (ADR-0028), but
+    DuckDB's scanner pushes no filter into SQLite: every partition still read
+    nine whole national tables, two minutes a partition, about four hours for
+    France. Narrowed in SQLite, through its indexes, a partition's rows are
+    all DuckDB reads. Here: the same one-certificate partition, before and
+    after three million rows of other certificates join its tables. ADR-0030.
+    """
+    path = tmp_path / "t.sqlite"
+    schema.build(path, scales=SCALES)
+    conn = db.connect(path, bulk=True)
+    ingest.Loader(conn, spec.load(SCALES)).load_page(
+        [_row("2409E0000001", "09001", "09"), _row("2497E0000001", "97701", "977")]
+    )
+    conn.commit()
+
+    real = duckdb.connect
+    seen: list[_Profiled] = []
+
+    def profiled(*args, **kwargs):
+        seen.append(_Profiled(real(*args, **kwargs), tmp_path / f"profile-{len(seen)}.json"))
+        return seen[-1]
+
+    monkeypatch.setattr(export_parquet.duckdb, "connect", profiled)
+    export_parquet.export(path, tmp_path / "alone", ["977"])
+    alone = seen[-1].sqlite_rows
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    for table in [
+        r[0]
+        for r in conn.execute(
+            "SELECT m.name FROM sqlite_master m WHERE m.type = 'table' AND m.name != 'dpe'"
+            " AND EXISTS (SELECT 1 FROM pragma_table_info(m.name) p WHERE p.name = 'dpe_id')"
+        )
+    ]:
+        rest = ", ".join(
+            f'"{r[1]}"' for r in conn.execute(f"PRAGMA table_info({table})") if r[1] != "dpe_id"
+        )
+        conn.execute(
+            "WITH RECURSIVE s(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM s WHERE i < 3000000)"
+            f" INSERT INTO {table} (dpe_id, {rest})"
+            f" SELECT 1000000 + s.i, {rest} FROM (SELECT * FROM {table} LIMIT 1), s"
+        )
+    conn.commit()
+    conn.close()
+
+    manifest = export_parquet.export(path, tmp_path / "crowded", ["977"])
+    crowded = seen[-1].sqlite_rows
+    monkeypatch.undo()
+
+    assert alone > 0, "the profile has to see the SQLite scans at all"
+    assert crowded - alone < 1000, (
+        f"exporting one certificate pulled {crowded:,} rows out of SQLite beside 3M"
+        f" other rows, {alone:,} alone: the narrowing is reading the whole tables"
+    )
+    assert [p["rows"] for p in manifest["partitions"]] == [1]
+
+
+def test_a_partitions_coordinates_do_not_go_into_duckdb_one_row_at_a_time(tmp_path, monkeypatch):
+    """DuckDB's executemany inserts a row at a time: measured at 1 619 rows/s
+    on departement 09's 31 157 coordinates, 19.2 of the partition's 31.6 s,
+    and about 2.7 hours for France. Every certificate's lat/lon went in that
+    way. A partition's rows must reach DuckDB in bulk; only the few side-file
+    rows may take the slow path. ADR-0030.
+    """
+    path = tmp_path / "t.sqlite"
+    schema.build(path, scales=SCALES)
+    conn = db.connect(path, bulk=True)
+    ingest.Loader(conn, spec.load(SCALES)).load_page(
+        [_row(f"2409E{i:07d}", "09001", "09") for i in range(FIXTURE_ROWS)]
+    )
+    conn.commit()
+    conn.close()
+
+    real = duckdb.connect
+    seen: list[_Profiled] = []
+
+    def profiled(*args, **kwargs):
+        seen.append(_Profiled(real(*args, **kwargs), tmp_path / f"profile-{len(seen)}.json"))
+        return seen[-1]
+
+    monkeypatch.setattr(export_parquet.duckdb, "connect", profiled)
+    manifest = export_parquet.export(path, tmp_path / "out", ["09"])
+    monkeypatch.undo()
+
+    assert [p["rows"] for p in manifest["partitions"]] == [FIXTURE_ROWS]
+    assert seen[-1].one_at_a_time < 100, (
+        f"{seen[-1].one_at_a_time:,} rows of a {FIXTURE_ROWS:,}-certificate partition"
+        " went into DuckDB through executemany, a row at a time"
+    )
 
 
 def _peak_growth_mb(export) -> float:
