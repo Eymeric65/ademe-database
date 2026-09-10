@@ -11,6 +11,7 @@ cursor, so a killed run restarts mid-departement instead of re-downloading it.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 from datetime import date
@@ -63,6 +64,15 @@ def to_scaled(raw: str, scale: int) -> tuple[int | None, str | None]:
     return int(scaled), None
 
 
+class Accumulator:
+    """One page's pending child rows, so they can be inserted in one go."""
+
+    def __init__(self, repeats):
+        self.violations: list = []
+        self.brut: list = []
+        self.children: dict[str, list] = {r.table: [] for r in repeats}
+
+
 class Loader:
     def __init__(self, conn, cols: dict[str, spec.Column]):
         self.conn = conn
@@ -71,12 +81,20 @@ class Loader:
         self.vocab: dict[str, dict[str, int]] = {}
         self.commune: dict[tuple, int] = {}
         self.adresse: dict[tuple, int] = {}
-        self._ensure_numero_unique()
+        self._ensure_load_prerequisites()
         self._load_vocab()
         self._load_communes()
 
-    def _ensure_numero_unique(self) -> None:
-        """The one index the load cannot defer to `finalise`.
+    def _ensure_load_prerequisites(self) -> None:
+        """The two pieces of schema the load itself depends on.
+
+        Both are created here rather than left to `ademe.schema`, because a
+        database part-way through a 15.5M-row import was built by an older
+        version of this code and nobody is going to re-run the schema step
+        before resuming it. `IF NOT EXISTS` makes that free.
+
+        `bad_row` is the quarantine (ADR-0015). `ux_dpe_numero` is the one
+        index the load cannot defer to `finalise`.
 
         TRAP: a stored resume cursor has a shelf life. `ingest_departement`
         keeps the server's own `after` token, but ADEME keeps publishing --
@@ -93,6 +111,7 @@ class Loader:
         fails hours later, when it builds the same index over 15M rows. With
         it, `load_page` skips what it already has. See ADR-0014.
         """
+        self.conn.execute(ddl.BAD_ROW_DDL)
         self.conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe(numero_dpe)"
         )
@@ -234,65 +253,154 @@ class Loader:
             return v, bad
         return raw, None
 
+    # -- quarantine ---------------------------------------------------------
+    def _cache_mark(self) -> tuple:
+        """Sizes of the dedup caches, for undoing a rolled-back row.
+
+        TRAP: the caches are the reason a savepoint is not enough on its own.
+        `adresse_id` and `commune_id` write a row and remember its id; roll the
+        write back and the id is gone, but the cache still hands it out. Every
+        later certificate at that address would then carry a dangling
+        `adresse_id` -- accepted silently, because the load runs with
+        `PRAGMA foreign_keys = OFF`, and surfacing 12 hours later as a
+        `foreign_key_check` failure in `finalise`. Dicts keep insertion order,
+        so the entries added during one row are exactly the last few.
+        """
+        return (
+            len(self.commune),
+            len(self.adresse),
+            {d: len(v) for d, v in self.vocab.items()},
+        )
+
+    def _cache_reset(self, mark: tuple) -> None:
+        n_commune, n_adresse, n_vocab = mark
+        for cache, n in ((self.commune, n_commune), (self.adresse, n_adresse)):
+            for key in list(cache)[n:]:
+                del cache[key]
+        for domain, n in n_vocab.items():
+            for key in list(self.vocab[domain])[n:]:
+                del self.vocab[domain][key]
+
+    def _quarantine(self, row: dict, exc: BaseException) -> None:
+        self.conn.execute(
+            "INSERT INTO bad_row (numero_dpe, code_departement, error, raw)"
+            " VALUES (?,?,?,?)",
+            (
+                row.get("numero_dpe"),
+                row.get("code_departement_ban"),
+                f"{type(exc).__name__}: {exc}",
+                json.dumps(row, ensure_ascii=False, sort_keys=True),
+            ),
+        )
+
     def load_page(self, rows: list[dict]) -> int:
+        """Load a page, and do not let one certificate end a seventeen-hour run.
+
+        Two paths. The fast one is what runs 15.5M times: convert every row,
+        then insert the children with `executemany`, because a per-row round
+        trip across seven child tables is the difference between 500 rows/s and
+        a crawl.
+
+        The slow one runs only for a page that raised. It rolls the whole page
+        back -- so the fast path's partial work cannot survive -- and replays it
+        one certificate at a time inside a savepoint each. Whatever fails goes
+        to `bad_row` with its raw CSV and the exception, and the other 9 999
+        rows load. A page has to actually break before anything pays for this.
+        """
+        self.conn.execute("SAVEPOINT page")
+        try:
+            self._load_rows(rows)
+        except Exception:
+            self.conn.execute("ROLLBACK TO page")
+            self._cache_reset(self._page_mark)
+            self._load_rows_carefully(rows)
+        self.conn.execute("RELEASE page")
+        return len(rows)
+
+    def _load_rows(self, rows: list[dict]) -> None:
+        self._page_mark = self._cache_mark()
+        acc = Accumulator(REPEATS)
+        for row in rows:
+            self._convert_row(row, acc)
+        self._flush(acc)
+
+    def _load_rows_carefully(self, rows: list[dict]) -> None:
+        """One certificate per savepoint. Slow, and only ever used on a page
+        that already failed."""
+        for row in rows:
+            mark = self._cache_mark()
+            self.conn.execute("SAVEPOINT row")
+            try:
+                acc = Accumulator(REPEATS)
+                self._convert_row(row, acc)
+                self._flush(acc)
+            except Exception as exc:
+                self.conn.execute("ROLLBACK TO row")
+                self._cache_reset(mark)
+                self._quarantine(row, exc)
+            self.conn.execute("RELEASE row")
+
+    def _insert_sql(self) -> tuple[str, list[str]]:
         dpe_cols = [k for k in self.cov.dpe if k != "numero_dpe"]
         names = ", ".join(f'"{ddl.dest_name(self.cols[k])}"' for k in dpe_cols)
         placeholders = ", ".join("?" * (len(dpe_cols) + 4))
-        insert = (
+        return (
             f"INSERT INTO dpe (numero_dpe, adresse_id, lat, lon, {names})"
             f" VALUES ({placeholders})"
-            " ON CONFLICT(numero_dpe) DO NOTHING RETURNING dpe_id"
+            " ON CONFLICT(numero_dpe) DO NOTHING RETURNING dpe_id",
+            dpe_cols,
         )
-        violations, brut_rows, child_rows = [], [], {r.table: [] for r in REPEATS}
 
-        for row in rows:
-            aid = self.adresse_id(row)
-            vals, bad = [], []
-            for k in dpe_cols:
-                v, raw = self.convert(k, row.get(k, ""))
-                vals.append(v)
-                if raw is not None:
-                    bad.append((k, raw))
-            lat = lon = None
-            if geo := row.get("_geopoint"):
-                try:
-                    a, b = geo.split(",")
-                    lat, lon = int(Decimal(a) * 10**6), int(Decimal(b) * 10**6)
-                except (ValueError, InvalidOperation):
-                    pass
-            got = self.conn.execute(
-                insert, (row.get("numero_dpe"), aid, lat, lon, *vals)
-            ).fetchone()
-            if got is None:
-                # Already loaded -- a resumed cursor served it twice. Its
-                # children are already there too, so the whole row is skipped.
-                # Still counted: `rows_loaded` tracks the certificates the
-                # server has handed over, which is what the cursor advances
-                # past, not the ones that turned out to be new.
-                continue
-            dpe_id = got[0]
-            violations.extend((dpe_id, k, r) for k, r in bad)
+    def _convert_row(self, row: dict, acc: "Accumulator") -> None:
+        insert, dpe_cols = self._insert_sql()
+        aid = self.adresse_id(row)
+        vals, bad = [], []
+        for k in dpe_cols:
+            v, raw = self.convert(k, row.get(k, ""))
+            vals.append(v)
+            if raw is not None:
+                bad.append((k, raw))
+        lat = lon = None
+        if geo := row.get("_geopoint"):
+            try:
+                a, b = geo.split(",")
+                lat, lon = int(Decimal(a) * 10**6), int(Decimal(b) * 10**6)
+            except (ValueError, InvalidOperation):
+                pass
+        got = self.conn.execute(
+            insert, (row.get("numero_dpe"), aid, lat, lon, *vals)
+        ).fetchone()
+        if got is None:
+            # Already loaded -- a resumed cursor served it twice. Its children
+            # are already there too, so the whole row is skipped. Still
+            # counted: `rows_loaded` tracks the certificates the server has
+            # handed over, which is what the cursor advances past, not the ones
+            # that turned out to be new.
+            return
+        dpe_id = got[0]
+        acc.violations.extend((dpe_id, k, r) for k, r in bad)
 
-            brut = [self.convert(s, row.get(s, ""))[0] for s in ADRESSE_BRUT_COLUMNS]
-            if any(v is not None for v in brut):
-                brut_rows.append((dpe_id, *brut))
+        brut = [self.convert(s, row.get(s, ""))[0] for s in ADRESSE_BRUT_COLUMNS]
+        if any(v is not None for v in brut):
+            acc.brut.append((dpe_id, *brut))
 
-            for rep in REPEATS:
-                for slot in rep.slots():
-                    vals = []
-                    for src in slot["src_to_dst"]:
-                        v, raw = self.convert(src, row.get(src, ""))
-                        vals.append(v)
-                        if raw is not None:
-                            violations.append((dpe_id, src, raw))
-                    if all(v is None for v in vals):
-                        continue  # the occurrence does not exist
-                    key = [dpe_id, slot["outer"]]
-                    if rep.inner:
-                        key.append(slot["inner"])
-                    child_rows[rep.table].append((*key, *vals))
+        for rep in REPEATS:
+            for slot in rep.slots():
+                vals = []
+                for src in slot["src_to_dst"]:
+                    v, raw = self.convert(src, row.get(src, ""))
+                    vals.append(v)
+                    if raw is not None:
+                        acc.violations.append((dpe_id, src, raw))
+                if all(v is None for v in vals):
+                    continue  # the occurrence does not exist
+                key = [dpe_id, slot["outer"]]
+                if rep.inner:
+                    key.append(slot["inner"])
+                acc.children[rep.table].append((*key, *vals))
 
-        if brut_rows:
+    def _flush(self, acc: "Accumulator") -> None:
+        if acc.brut:
             cols = ", ".join(
                 f'"{ddl.dest_name(self.cols[s], d)}"'
                 for s, d in ADRESSE_BRUT_COLUMNS.items()
@@ -300,10 +408,10 @@ class Loader:
             self.conn.executemany(
                 f"INSERT INTO dpe_adresse_brut (dpe_id, {cols})"
                 f" VALUES ({', '.join('?' * (len(ADRESSE_BRUT_COLUMNS) + 1))})",
-                brut_rows,
+                acc.brut,
             )
         for rep in REPEATS:
-            batch = child_rows[rep.table]
+            batch = acc.children[rep.table]
             if not batch:
                 continue
             slot0 = rep.slots()[0]["src_to_dst"]
@@ -315,13 +423,12 @@ class Loader:
                 f" VALUES ({', '.join('?' * (len(keys) + len(dst)))})",
                 batch,
             )
-        if violations:
+        if acc.violations:
             self.conn.executemany(
                 "INSERT INTO scale_violation (dpe_id, column_name, raw_value)"
                 " VALUES (?,?,?) ON CONFLICT DO NOTHING",
-                violations,
+                acc.violations,
             )
-        return len(rows)
 
 
 def departements(client) -> list[str]:

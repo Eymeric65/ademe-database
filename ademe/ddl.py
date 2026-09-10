@@ -35,6 +35,18 @@ def dest_name(c: spec.Column, base: str | None = None) -> str:
     return _col_sql(c, base)[0]
 
 
+# Defined out here because the load creates it too: a database built before
+# quarantine existed has every other table but not this one, and the ingest
+# cannot report a bad row into a table that is not there.
+BAD_ROW_DDL = """CREATE TABLE IF NOT EXISTS bad_row (
+    numero_dpe       TEXT,
+    code_departement TEXT,
+    error            TEXT NOT NULL,
+    raw              TEXT NOT NULL,
+    seen_at          TEXT NOT NULL DEFAULT (datetime())
+)"""
+
+
 def bookkeeping_ddl() -> list[str]:
     return [
         # The losslessness contract, machine-readable: how to get every source
@@ -57,6 +69,12 @@ def bookkeeping_ddl() -> list[str]:
     schema_sha256 TEXT,
     retrieved_at TEXT NOT NULL
 ) WITHOUT ROWID""",
+        # Where a certificate goes when it cannot be loaded at all. A
+        # seventeen-hour import must not end because one row in 15.5M is
+        # malformed -- but it must not pretend that row arrived either, so the
+        # raw CSV is kept and `finalise` refuses to publish a build whose
+        # quarantine is not empty and unreviewed. See ADR-0015.
+        BAD_ROW_DDL,
         # Resumability spine. One row per departement; `next_cursor` is the
         # Data Fair `after=` token, so a killed run restarts mid-departement
         # rather than re-downloading it.
