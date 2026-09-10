@@ -1,14 +1,14 @@
 ---
-status: accepted
+status: superseded
 date: 2026-09-10
 area: data plane
 supersedes:
-superseded-by:
+superseded-by: 0030
 ---
 
 # ADR-0028 — The export narrows each table to the partition before joining
 
-**Status:** accepted · **Decided:** 2026-09-10 · **Area:** data plane
+**Status:** superseded by [ADR-0030](0030-the-export-narrows-in-sqlite-where-the-indexes-are.md) · **Decided:** 2026-09-10 · **Area:** data plane
 
 ## Context and Problem Statement
 

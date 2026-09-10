@@ -21,6 +21,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
+import tempfile
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -363,48 +365,68 @@ def export(
     for part, part_codes in sorted(by_partition.items()):
         quoted = ", ".join(f"'{c}'" for c in part_codes)
         _, dept_col, dept_domain = _dept_source(conn, source)
+        # SQLite's dialect, against the build itself: the partition is narrowed
+        # there, below.
         if part == UNGEOCODED:
             where = (
-                "d.dpe_id IN (SELECT d2.dpe_id FROM sq.dpe d2"
-                " LEFT JOIN sq.adresse a2 ON a2.adresse_id = d2.adresse_id"
-                " LEFT JOIN sq.commune c2 ON c2.commune_id = a2.commune_id"
-                f" LEFT JOIN sq.vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
+                "d.dpe_id IN (SELECT d2.dpe_id FROM dpe d2"
+                " LEFT JOIN adresse a2 ON a2.adresse_id = d2.adresse_id"
+                " LEFT JOIN commune c2 ON c2.commune_id = a2.commune_id"
+                f" LEFT JOIN vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
                 " WHERE v2.code IS NULL OR v2.code = '')"
             )
         else:
             where = (
-                "d.dpe_id IN (SELECT d2.dpe_id FROM sq.dpe d2"
-                " JOIN sq.adresse a2 ON a2.adresse_id = d2.adresse_id"
-                " JOIN sq.commune c2 ON c2.commune_id = a2.commune_id"
-                f" JOIN sq.vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
+                "d.dpe_id IN (SELECT d2.dpe_id FROM dpe d2"
+                " JOIN adresse a2 ON a2.adresse_id = d2.adresse_id"
+                " JOIN commune c2 ON c2.commune_id = a2.commune_id"
+                f" JOIN vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
                 f" WHERE v2.code IN ({quoted}))"
             )
 
-        duck.execute("CREATE OR REPLACE TEMP TABLE geopoint (dpe_id BIGINT, lat DOUBLE, lon DOUBLE)")
-        rows = _geopoint_rows(conn, part_codes, source)
-        if rows:
-            duck.executemany("INSERT INTO geopoint VALUES (?, ?, ?)", rows)
-
         # Every per-certificate table, narrowed to this partition BEFORE the
-        # join. Joined whole, each repeating-group slot hashed a national table
-        # and the first national partition ran out of memory. See ADR-0028.
-        narrowed = {"dpe": "p_dpe", "adresse": "p_adresse"}
-        duck.execute(f"CREATE OR REPLACE TEMP TABLE p_dpe AS SELECT * FROM sq.dpe d WHERE {where}")
-        duck.execute(
-            "CREATE OR REPLACE TEMP TABLE p_adresse AS SELECT * FROM sq.adresse"
-            " WHERE adresse_id IN (SELECT adresse_id FROM p_dpe)"
+        # join (joined whole, the first national partition ran out of memory,
+        # ADR-0028) -- and narrowed in SQLite, where the indexes are. DuckDB's
+        # scanner pushes no filter down, so narrowing on its side read every
+        # national table whole for every partition. The partition's rows go to
+        # a scratch file beside the tree, which DuckDB reads whole. ADR-0030.
+        tables = list(dict.fromkeys(["dpe_adresse_brut", *(r.table for r in source.mapping.repeats)]))
+        fd, scratch = tempfile.mkstemp(prefix=f".narrow-{part}-", suffix=".sqlite", dir=out_dir)
+        os.close(fd)
+        conn.execute("ATTACH ? AS p", (scratch,))
+        conn.execute(f"CREATE TABLE p.dpe AS SELECT d.* FROM dpe d WHERE {where}")
+        conn.execute(
+            "CREATE TABLE p.adresse AS SELECT * FROM adresse"
+            " WHERE adresse_id IN (SELECT adresse_id FROM p.dpe)"
         )
-        for table in dict.fromkeys(["dpe_adresse_brut", *(r.table for r in source.mapping.repeats)]):
-            narrowed[table] = f"p_{table}"
-            duck.execute(
-                f"CREATE OR REPLACE TEMP TABLE p_{table} AS SELECT * FROM sq.{table}"
-                " WHERE dpe_id IN (SELECT dpe_id FROM p_dpe)"
+        for table in tables:
+            conn.execute(
+                f"CREATE TABLE p.{table} AS SELECT * FROM {table}"
+                " WHERE dpe_id IN (SELECT dpe_id FROM p.dpe)"
             )
+        # The derived coordinates go in beside them, and reach DuckDB in bulk:
+        # its executemany inserts a row at a time, 1 619 rows/s, which was
+        # 19 of departement 09's 31 seconds and hours for France.
+        conn.execute("CREATE TABLE p.geopoint (dpe_id INTEGER, lat REAL, lon REAL)")
+        conn.executemany(
+            "INSERT INTO p.geopoint VALUES (?, ?, ?)", _geopoint_rows(conn, part_codes, source)
+        )
+        conn.commit()
+        conn.execute("DETACH p")
+        duck.execute(f"ATTACH '{scratch}' AS pq (TYPE sqlite, READ_ONLY)")
+        duck.execute(
+            "CREATE OR REPLACE TEMP TABLE geopoint AS"
+            " SELECT CAST(dpe_id AS BIGINT) AS dpe_id, CAST(lat AS DOUBLE) AS lat,"
+            " CAST(lon AS DOUBLE) AS lon FROM pq.geopoint"
+        )
+        narrowed = {t: f"pq.{t}" for t in ["dpe", "adresse", *tables]}
 
         duck.execute(
             "CREATE OR REPLACE TEMP TABLE wide AS"
             f" {wide_select(conn, source=source, tables=narrowed)}"
         )
+        duck.execute("DETACH pq")
+        os.unlink(scratch)
         n = duck.execute("SELECT COUNT(*) FROM wide").fetchone()[0]
         if not quiet:
             print(f"  dept={part}: {n:,} certificates")
