@@ -167,7 +167,7 @@ def wide_select(conn, *, where: str = "TRUE") -> str:
 
     joins = [
         "LEFT JOIN sq.adresse a ON a.adresse_id = d.adresse_id",
-        "LEFT JOIN sq.commune cm ON cm.code_insee = a.code_insee",
+        "LEFT JOIN sq.commune cm ON cm.commune_id = a.commune_id",
         "LEFT JOIN sq.dpe_adresse_brut br ON br.dpe_id = d.dpe_id",
         "LEFT JOIN geopoint g ON g.dpe_id = d.dpe_id",
     ]
@@ -235,7 +235,7 @@ def _geopoint_rows(conn, codes: list[str]) -> list[tuple[int, float | None, floa
         "SELECT d.dpe_id, d.coordonnee_cartographique_x_ban, d.coordonnee_cartographique_y_ban"
         " FROM dpe d"
         " JOIN adresse a ON a.adresse_id = d.adresse_id"
-        " JOIN commune c ON c.code_insee = a.code_insee"
+        " JOIN commune c ON c.commune_id = a.commune_id"
         f" {_dept_join(conn)}"
         f" WHERE v.code IN ({marks})",
         codes,
@@ -285,7 +285,7 @@ def export(
         where = (
             "d.dpe_id IN (SELECT d2.dpe_id FROM sq.dpe d2"
             " JOIN sq.adresse a2 ON a2.adresse_id = d2.adresse_id"
-            " JOIN sq.commune c2 ON c2.code_insee = a2.code_insee"
+            " JOIN sq.commune c2 ON c2.commune_id = a2.commune_id"
             f" JOIN sq.vocab_{dept_domain} v2 ON v2.id = c2.{dept_col}"
             f" WHERE v2.code IN ({quoted}))"
         )
