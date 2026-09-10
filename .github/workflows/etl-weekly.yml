@@ -73,6 +73,79 @@ jobs:
           rclone copy out/v1/index  r2:ademe-dpe/v1/index  --checksum
           rclone copyto out/v1/manifest.json r2:ademe-dpe/v1/manifest.json
 
+      # Every other source, after existing housing and one after another: one
+      # ADEME stream at a time (CLAUDE.md §11), so never in parallel. A source whose
+      # tree is not published yet is skipped, since its first build is by hand.
+      # tests/test_workflows.py keeps every registered source here. ADR-0027.
+      - name: New housing, published?
+        id: neuf
+        run: |
+          if curl -sf -o /dev/null -A "ademe-database/0.1 (weekly)" "$DATA_BASE_URL/neuf/manifest.json"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::new housing is not published yet; skipped"
+          fi
+
+      - name: New housing, fetch, merge, reconcile, check
+        id: neuf_delta
+        if: steps.neuf.outputs.published == 'true'
+        run: |
+          uv run python -m ademe.delta --source neuf --base-url "$DATA_BASE_URL/neuf" --out out
+          # Nothing modified this week: no tree was written, and nothing is uploaded.
+          if [ ! -f out/v1/neuf/manifest.json ]; then exit 0; fi
+          uv run python scripts/reconcile.py --source neuf --root out/v1/neuf --out reconciled
+          if [ -d reconciled/v1/neuf ]; then rm -rf out/v1/neuf && mv reconciled/v1/neuf out/v1/neuf; fi
+          uv run python scripts/check_delta.py --source neuf --out out --base-url "$DATA_BASE_URL/neuf"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: New housing, upload
+        if: steps.neuf_delta.outputs.changed == 'true'
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          rclone copy out/v1/neuf/search r2:ademe-dpe/v1/neuf/search --checksum
+          rclone copy out/v1/neuf/dpe    r2:ademe-dpe/v1/neuf/dpe    --checksum
+          rclone copy out/v1/neuf/index  r2:ademe-dpe/v1/neuf/index  --checksum
+          rclone copyto out/v1/neuf/manifest.json r2:ademe-dpe/v1/neuf/manifest.json
+
+      - name: Tertiary, published?
+        id: tertiaire
+        run: |
+          if curl -sf -o /dev/null -A "ademe-database/0.1 (weekly)" "$DATA_BASE_URL/tertiaire/manifest.json"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::the tertiary DPE is not published yet; skipped"
+          fi
+
+      - name: Tertiary, fetch, merge, reconcile, check
+        id: tertiaire_delta
+        if: steps.tertiaire.outputs.published == 'true'
+        run: |
+          uv run python -m ademe.delta --source tertiaire --base-url "$DATA_BASE_URL/tertiaire" --out out
+          if [ ! -f out/v1/tertiaire/manifest.json ]; then exit 0; fi
+          uv run python scripts/reconcile.py --source tertiaire --root out/v1/tertiaire --out reconciled
+          if [ -d reconciled/v1/tertiaire ]; then rm -rf out/v1/tertiaire && mv reconciled/v1/tertiaire out/v1/tertiaire; fi
+          uv run python scripts/check_delta.py --source tertiaire --out out --base-url "$DATA_BASE_URL/tertiaire"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Tertiary, upload
+        if: steps.tertiaire_delta.outputs.changed == 'true'
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          rclone copy out/v1/tertiaire/search r2:ademe-dpe/v1/tertiaire/search --checksum
+          rclone copy out/v1/tertiaire/dpe    r2:ademe-dpe/v1/tertiaire/dpe    --checksum
+          rclone copy out/v1/tertiaire/index  r2:ademe-dpe/v1/tertiaire/index  --checksum
+          rclone copyto out/v1/tertiaire/manifest.json r2:ademe-dpe/v1/tertiaire/manifest.json
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
