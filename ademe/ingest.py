@@ -71,8 +71,32 @@ class Loader:
         self.vocab: dict[str, dict[str, int]] = {}
         self.commune: dict[tuple, int] = {}
         self.adresse: dict[tuple, int] = {}
+        self._ensure_numero_unique()
         self._load_vocab()
         self._load_communes()
+
+    def _ensure_numero_unique(self) -> None:
+        """The one index the load cannot defer to `finalise`.
+
+        TRAP: a stored resume cursor has a shelf life. `ingest_departement`
+        keeps the server's own `after` token, but ADEME keeps publishing --
+        departement 30 grew from 157 179 to 157 573 rows over the three days a
+        crashed run sat idle. The token is a position in a sort order, so once
+        rows are inserted ahead of it the resume re-serves certificates that
+        are already loaded, and there is nothing in the response that says so.
+
+        Verified: ADEME serves no duplicates within one pass (157 573 rows for
+        dept 30, 157 573 distinct numeros). The duplication is entirely an
+        artefact of resuming across a change.
+
+        Without this index the second copy inserts silently and `finalise`
+        fails hours later, when it builds the same index over 15M rows. With
+        it, `load_page` skips what it already has. See ADR-0014.
+        """
+        self.conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe(numero_dpe)"
+        )
+        self.conn.commit()
 
     # -- reference data ----------------------------------------------------
     def _load_vocab(self) -> None:
@@ -216,7 +240,8 @@ class Loader:
         placeholders = ", ".join("?" * (len(dpe_cols) + 4))
         insert = (
             f"INSERT INTO dpe (numero_dpe, adresse_id, lat, lon, {names})"
-            f" VALUES ({placeholders}) RETURNING dpe_id"
+            f" VALUES ({placeholders})"
+            " ON CONFLICT(numero_dpe) DO NOTHING RETURNING dpe_id"
         )
         violations, brut_rows, child_rows = [], [], {r.table: [] for r in REPEATS}
 
@@ -235,9 +260,17 @@ class Loader:
                     lat, lon = int(Decimal(a) * 10**6), int(Decimal(b) * 10**6)
                 except (ValueError, InvalidOperation):
                     pass
-            dpe_id = self.conn.execute(
+            got = self.conn.execute(
                 insert, (row.get("numero_dpe"), aid, lat, lon, *vals)
-            ).fetchone()[0]
+            ).fetchone()
+            if got is None:
+                # Already loaded -- a resumed cursor served it twice. Its
+                # children are already there too, so the whole row is skipped.
+                # Still counted: `rows_loaded` tracks the certificates the
+                # server has handed over, which is what the cursor advances
+                # past, not the ones that turned out to be new.
+                continue
+            dpe_id = got[0]
             violations.extend((dpe_id, k, r) for k, r in bad)
 
             brut = [self.convert(s, row.get(s, ""))[0] for s in ADRESSE_BRUT_COLUMNS]
