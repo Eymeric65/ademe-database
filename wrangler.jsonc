@@ -63,7 +63,12 @@
         // empty string makes authFor() fall back to the request's own origin.
         // Every branch gets its own <alias>-ademe-app-preview host, so no
         // static value could be right for all of them.
-        "BETTER_AUTH_URL": ""
+        "BETTER_AUTH_URL": "",
+
+        // TRAP: preview only, like AUTH_TEST_CREDENTIALS. The one preview host
+        // registered with Google: every branch preview's Google sign-in goes
+        // through it and comes back. See ADR-0036.
+        "OAUTH_PROXY_URL": "https://ademe-app-preview.eymeric-chauchat.workers.dev"
       },
       "d1_databases": [
         {
