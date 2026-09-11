@@ -40,7 +40,13 @@ export default defineConfig({
     baseURL,
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Firefox for the range reads alone: it answered DuckDB's ranged HEAD
+    // from its own cache, and a suite that only ever ran Chrome passed while
+    // every certificate failed to open there.
+    { name: 'firefox', use: { ...devices['Desktop Firefox'] }, testMatch: /perf\.spec\.ts/ },
+  ],
   // Fails the run if the Worker does not answer 206 to a Range request, which
   // is the one way this whole suite could pass while testing nothing.
   globalSetup: './test/e2e/global-setup.ts',

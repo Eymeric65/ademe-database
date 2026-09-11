@@ -53,6 +53,28 @@ describe('the data route', () => {
     expect(res.status).toBe(200)
     expect(res.headers.get('content-length')).toBe(String(SIZE))
   })
+
+  it('never lets a browser keep a HEAD answer', async () => {
+    /**
+     * Firefox answers DuckDB's ranged HEAD out of the plain HEAD it cached a
+     * moment before: 200, no Content-Range, and every file failed to open.
+     * Measured on Firefox 153; Chrome goes to the network.
+     */
+    await env.DATA.put('v1/probe.bin', new Uint8Array(SIZE))
+    await env.DATA.put('vendor/probe.bin', new Uint8Array(SIZE))
+    const cookie = await signUp('head-cache@example.test')
+    for (const [path, range] of [
+      ['v1/probe.bin', null],
+      ['v1/probe.bin', 'bytes=0-'],
+      ['vendor/probe.bin', null],
+    ] as const) {
+      const res = await SELF.fetch(`http://x/data/${path}`, {
+        method: 'HEAD',
+        headers: { cookie, ...(range ? { range } : {}) },
+      })
+      expect(res.headers.get('cache-control'), `${path} ${range ?? ''}`).toBe('no-store')
+    }
+  })
 })
 
 describe('the gate', () => {
