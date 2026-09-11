@@ -73,6 +73,8 @@ SEARCH_SORT = ("code_postal_ban", "etiquette_dpe", "surface_habitable_logement")
 # See ADR-0018.
 SEARCH: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "existant": (SEARCH_COLUMNS, SEARCH_SORT),
+    # New housing has every one of these columns. ADR-0025.
+    "neuf": (SEARCH_COLUMNS, SEARCH_SORT),
 }
 
 # The overseas departements are three-digit codes with a few thousand rows
