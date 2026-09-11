@@ -161,7 +161,7 @@ def merge_partition(duck, base: Path | str, delta_dir: Path, dept: str, out: Pat
                   )
                   ORDER BY {order}
                 ) TO '{dest}'
-                (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group})"""
+                (FORMAT parquet, {export_parquet.COMPRESSION}, ROW_GROUP_SIZE {row_group})"""
         )
 
     return duck.execute(
@@ -384,7 +384,7 @@ def apply_deletions(root: Path | str, report: dict[str, Divergence], out: Path) 
             duck.execute(
                 f"COPY (SELECT {columns} FROM read_parquet('{src}', hive_partitioning = false)"
                 f" WHERE numero_dpe NOT IN ({ids}) ORDER BY {order}) TO '{dest}'"
-                f" (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group})"
+                f" (FORMAT parquet, {export_parquet.COMPRESSION}, ROW_GROUP_SIZE {row_group})"
             )
         if gone:
             rewritten.append(dept)
