@@ -184,7 +184,7 @@ export function Detail({ record }: { record: DetailRef }) {
                       </button>
                     ) : null}
                   </dt>
-                  <dd>{formatValue(key, value, rec.meta[key]?.encoding)}</dd>
+                  <dd>{formatValue(key, value, rec.meta[key]?.encoding, row)}</dd>
                   {shown ? (
                     <dd className="fact-hint">
                       {f.hint} <span className="fact-key">Colonne ADEME : <code>{key}</code></span>

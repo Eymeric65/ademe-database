@@ -60,6 +60,7 @@ const CUMUL = 'Écart avec l’état initial du logement, cumulé jusqu’à cet
 const QUAL = 'Appréciation du diagnostiqueur, d’insuffisante à très bonne.'
 const INPUT = 'Tel que le diagnostiqueur l’a saisi, avant géocodage.'
 const BAN = 'Selon la Base Adresse Nationale, qui corrige l’adresse saisie.'
+const BUILDING = 'Pour un appartement tiré d’un DPE d’immeuble, c’est souvent la valeur de tout l’immeuble.'
 
 const FIELDS: Record<string, Field> = {
   // --- Administratif --------------------------------------------------------
@@ -219,7 +220,7 @@ const FIELDS: Record<string, Field> = {
   // --- Apports et besoins ---------------------------------------------------
   apport_interne_saison_chauffe: F(
     'Apports internes en hiver',
-    'Chaleur dégagée par les occupants et les appareils pendant la saison de chauffe ; elle réduit le chauffage.',
+    `Chaleur dégagée par les occupants et les appareils pendant la saison de chauffe ; elle réduit le chauffage. ${BUILDING}`,
     'kwh',
   ),
   apport_interne_saison_froide: F(
@@ -229,7 +230,7 @@ const FIELDS: Record<string, Field> = {
   ),
   apport_solaire_saison_chauffe: F(
     'Apports solaires en hiver',
-    'Chaleur du soleil entrée par les vitrages pendant la saison de chauffe ; elle réduit le chauffage.',
+    `Chaleur du soleil entrée par les vitrages pendant la saison de chauffe ; elle réduit le chauffage. ${BUILDING}`,
     'kwh',
   ),
   apport_solaire_saison_froide: F(
@@ -239,7 +240,7 @@ const FIELDS: Record<string, Field> = {
   ),
   besoin_chauffage: F(
     'Besoin de chauffage',
-    'Chaleur que le logement doit recevoir sur l’année pour rester à 19 °C, avant les pertes de l’installation. Elle ne dépend que du bâti.',
+    `Chaleur que le logement doit recevoir sur l’année pour rester à 19 °C, avant les pertes de l’installation. Elle ne dépend que du bâti. ${BUILDING}`,
     'kwh',
   ),
   besoin_ecs: F(
@@ -636,6 +637,26 @@ function toNumber(value: unknown): number | null {
   return null
 }
 
+export type Row = Record<string, unknown>
+
+/**
+ * TRAP: ADEME publishes the season apports in Wh on some records and in kWh on
+ * others, within one DPE version. Per m² of a dwelling the two never overlap
+ * (kWh stays under 1 000, Wh starts past 10 000), so past 10 000 it is Wh.
+ */
+const SOMETIMES_WH = new Set([
+  'apport_interne_saison_chauffe',
+  'apport_interne_saison_froide',
+  'apport_solaire_saison_chauffe',
+  'apport_solaire_saison_froide',
+])
+
+function fromWh(key: string, n: number, row?: Row): number {
+  if (!row || !SOMETIMES_WH.has(key)) return n
+  const surface = toNumber(row.surface_habitable_logement)
+  return surface && n / surface > 10_000 ? n / 1000 : n
+}
+
 function quantity(n: number, unit: Unit): string {
   let v = n
   let i = 0
@@ -654,7 +675,7 @@ function quantity(n: number, unit: Unit): string {
 }
 
 /** Values arrive from Arrow as numbers, strings, BigInts and epoch days. */
-export function formatValue(key: string, value: unknown, encoding?: string): string {
+export function formatValue(key: string, value: unknown, encoding?: string, row?: Row): string {
   if (value == null) return ''
   if (encoding === 'date' || value instanceof Date) return formatDate(value)
   const unit = field(key).unit
@@ -662,7 +683,7 @@ export function formatValue(key: string, value: unknown, encoding?: string): str
   if (unit && n != null) {
     if (unit === 'flag') return n ? 'Oui' : 'Non'
     if (unit === 'pct') return new Intl.NumberFormat('fr-FR', { style: 'percent', maximumFractionDigits: 1 }).format(n)
-    return quantity(n, UNITS[unit])
+    return quantity(fromWh(key, n, row), UNITS[unit])
   }
   // Codes, years, ids and labels: exactly as they came, no thousands separator.
   if (typeof value === 'bigint') return value.toString()

@@ -12,7 +12,8 @@ import { field, formatValue } from '../../src/detail/fields'
 
 // Intl puts a narrow no-break space in "2 220" and before units; compare text.
 const text = (s: string) => s.replace(/[  ]/g, ' ')
-const fmt = (key: string, value: unknown, encoding?: string) => text(formatValue(key, value, encoding))
+const fmt = (key: string, value: unknown, encoding?: string, row?: Record<string, unknown>) =>
+  text(formatValue(key, value, encoding, row))
 
 describe('formatValue', () => {
   it('puts energies in MWh once they pass a thousand kWh', () => {
@@ -38,6 +39,21 @@ describe('formatValue', () => {
     // Not in any schema: the ETL adds them. Six decimals is ten centimetres.
     expect(fmt('lon', 1.6274339999999998)).toBe('1,627434')
     expect(fmt('lat', 42.846709999999995)).toBe('42,84671')
+  })
+
+  it('reads a season apport ADEME published in Wh as Wh', () => {
+    // Some records carry the apports in Wh, the rest in kWh: 1 980 000 for a
+    // 76.6 m² house can only be Wh; 2732.5 for 113.9 m² is kWh.
+    const house = { surface_habitable_logement: 76.6 }
+    expect(fmt('apport_interne_saison_chauffe', 1980000, undefined, house)).toBe('1,98 MWh/an')
+    expect(fmt('apport_solaire_saison_chauffe', '2620000', undefined, { surface_habitable_logement: '76.6' })).toBe(
+      '2,62 MWh/an',
+    )
+    expect(fmt('apport_interne_saison_chauffe', 2732.5, undefined, { surface_habitable_logement: 113.9 })).toBe(
+      '2,73 MWh/an',
+    )
+    // Only the apports: a besoin is kWh on every record.
+    expect(fmt('besoin_chauffage', 17100, undefined, house)).toBe('17,1 MWh/an')
   })
 
   it('keeps euros whole', () => {

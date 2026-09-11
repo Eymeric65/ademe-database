@@ -85,6 +85,16 @@ test('a linked certificate shows its building and the parcel under it', async ({
   await expect(panel.getByText('667 m²')).toBeVisible()
 })
 
+test('an apport ADEME published in Wh is not shown a thousand times too big', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-wh'))
+  await page.goto('/#/existant/09/2109E0005780R')
+  // 1 980 000 for a 77 m² house: Wh, whatever ADEME's documentation says.
+  await expect(page.locator('.fact[data-key="apport_interne_saison_chauffe"] dd').first()).toHaveText(
+    '1,98 MWh/an',
+    { timeout: 60_000 },
+  )
+})
+
 test('an address match says how many buildings it could be', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('detail-ban'))
   await page.goto('/#/existant/09/2100E0188987T')
