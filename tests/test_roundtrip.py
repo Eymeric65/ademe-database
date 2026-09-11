@@ -12,6 +12,8 @@ is the check that matters.
 
 from __future__ import annotations
 
+import csv
+import io
 import os
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -66,14 +68,22 @@ def conn():
 
 
 def _fetch(client, numeros: list[str]) -> dict[str, dict]:
-    """The same records, straight from the source."""
+    """The same records, straight from the source.
+
+    Renamed with the labels ADEME publishes TODAY, not the vendored ones
+    `api.page` uses: through the same rename, a stale label loses the column
+    on both sides of the comparison and this test passes. That is how
+    `adresse_brut` went missing unseen. See ADR-0023.
+    """
+    live = api._get(client, API).json()["schema"]
+    to_key = {(f.get("label") or f["key"]): f["key"] for f in live}
     qs = " OR ".join(f'numero_dpe:"{n}"' for n in numeros)
-    p = api.page(
-        client,
-        f"{API}/lines",
-        {"size": len(numeros), "format": "csv", "qs": qs},
-    )
-    return {r["numero_dpe"]: r for r in p.rows}
+    r = api._get(client, f"{API}/lines", {"size": len(numeros), "format": "csv", "qs": qs})
+    rows = [
+        {to_key.get(h, h): v for h, v in row.items()}
+        for row in csv.DictReader(io.StringIO(r.content.decode("utf-8-sig")))
+    ]
+    return {row["numero_dpe"]: row for row in rows}
 
 
 @pytest.mark.live
