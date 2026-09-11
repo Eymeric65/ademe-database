@@ -75,6 +75,30 @@ SEARCH: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "existant": (SEARCH_COLUMNS, SEARCH_SORT),
     # New housing has every one of these columns. ADR-0025.
     "neuf": (SEARCH_COLUMNS, SEARCH_SORT),
+    # A tertiary building has no dwelling area: its own index. ADR-0026.
+    "tertiaire": (
+        (
+            "numero_dpe",
+            "code_departement_ban",
+            "code_postal_ban",
+            "code_insee_ban",
+            "nom_commune_ban",
+            "adresse_ban",
+            "etiquette_dpe",
+            "etiquette_ges",
+            "date_etablissement_dpe",
+            "surface_utile",
+            "conso_kwhep_m2_an",
+            "emission_ges_kg_co2_m2_an",
+            "secteur_activite",
+            "categorie_erp",
+            "annee_construction",
+            "periode_construction",
+            "lat",
+            "lon",
+        ),
+        ("code_postal_ban", "etiquette_dpe", "surface_utile"),
+    ),
 }
 
 # The overseas departements are three-digit codes with a few thousand rows
