@@ -61,7 +61,9 @@ jobs:
       # which will not `npm ci` this lock.
       - run: npm install -g npm@11
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      # Firefox too: it caches HEAD answers where Chrome does not, and the
+      # range reads broke there alone. See playwright.config.ts.
+      - run: npx playwright install --with-deps chromium firefox
       # `pretest:e2e` copies the 77 MB engine out of node_modules and seeds it,
       # with the Parquet fixtures, into the LOCAL R2 bucket the Worker reads.
       # Runs against `wrangler dev` -- assets, API and data on one origin, the

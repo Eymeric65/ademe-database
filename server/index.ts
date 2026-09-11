@@ -257,6 +257,10 @@ async function serveObject(
     if (!meta) return json({ error: 'not found' }, 404)
     meta.writeHttpMetadata(headers)
     headers.set('etag', meta.httpEtag)
+    // TRAP: never cacheable. Firefox answers DuckDB's ranged HEAD out of the
+    // plain HEAD it cached a moment before -- 200, no Content-Range -- and then
+    // every Parquet file fails to open. A HEAD has no body worth keeping.
+    headers.set('cache-control', 'no-store')
     // TRAP: DuckDB-WASM opens a file with HEAD + `Range: bytes=0-` and reads it
     // by ranges ONLY if that answers 206. A 200 -- what HTTP says a HEAD
     // should get -- sends it down a fallback that GETs the whole file, 146 MB
