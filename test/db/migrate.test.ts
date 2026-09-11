@@ -30,6 +30,46 @@ describe('migrate', () => {
     expect(await appliedNames()).toHaveLength(MIGRATIONS.length)
   })
 
+  it('upgrades a database from before sources: its saved rows are existing housing', async () => {
+    // What a deployed database holds today: 0000 and 0001, and one saved row.
+    await env.DB.prepare(
+      'CREATE TABLE IF NOT EXISTS _migration (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)',
+    ).run()
+    for (const m of MIGRATIONS.filter((m) => m.name < '0002')) {
+      for (const statement of m.statements) await env.DB.prepare(statement).run()
+      await env.DB.prepare('INSERT INTO _migration (name, applied_at) VALUES (?, 0)').bind(m.name).run()
+    }
+    await env.DB.prepare("INSERT INTO user (id, name, email) VALUES ('u1', 'u', 'u@example.test')").run()
+    await env.DB.prepare(
+      "INSERT INTO saved_building (id, user_id, numero_dpe) VALUES ('b1', 'u1', 'X')",
+    ).run()
+
+    expect(await migrate(env.DB)).toContain('0002_saved_building_source')
+    expect(
+      await env.DB.prepare("SELECT source, dept FROM saved_building WHERE id = 'b1'").first(),
+    ).toEqual({ source: 'existant', dept: null })
+
+    // The same numero in another source is a second row; twice in one is not.
+    const save = (id: string) =>
+      env.DB.prepare(
+        "INSERT INTO saved_building (id, user_id, numero_dpe, source) VALUES (?, 'u1', 'X', 'neuf')",
+      )
+        .bind(id)
+        .run()
+    await save('b2')
+    await expect(save('b3')).rejects.toThrow(/UNIQUE/i)
+  })
+
+  it('refuses a source outside the list', async () => {
+    await migrate(env.DB)
+    await env.DB.prepare("INSERT INTO user (id, name, email) VALUES ('u1', 'u', 'u@example.test')").run()
+    await expect(
+      env.DB.prepare(
+        "INSERT INTO saved_building (id, user_id, numero_dpe, source) VALUES ('b1', 'u1', 'X', 'bogus')",
+      ).run(),
+    ).rejects.toThrow(/CHECK/i)
+  })
+
   it('really created the schema: a foreign key on saved_building fires', async () => {
     await migrate(env.DB)
     await expect(

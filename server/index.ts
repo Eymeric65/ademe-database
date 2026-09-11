@@ -27,6 +27,7 @@ import {
   saveSearch,
   type Caller,
 } from './db'
+import { SAVED_SOURCES } from '../db/schema'
 
 /**
  * `signed-in` asks for a caller and filters on nothing, because the data it
@@ -100,8 +101,26 @@ export const ROUTES: Route[] = [
       const body = await readJson(request)
       const numeroDpe = str(body.numeroDpe)
       if (!numeroDpe) return json({ error: 'numeroDpe is required' }, 400)
+      // A client from before ADR-0034 sends no source: it meant existing housing.
+      const source = body.source == null ? 'existant' : str(body.source)
+      if (!source || !(SAVED_SOURCES as readonly string[]).includes(source)) {
+        return json({ error: 'unknown source' }, 400)
+      }
+      const dept = body.dept == null ? null : str(body.dept)
+      if (dept !== null && !/^(\d{2,3}|2A|2B|DOM|NG)$/.test(dept)) {
+        return json({ error: 'unknown dept' }, 400)
+      }
+      // An audit step's key names no partition and no index maps it to one, so
+      // a saved audit without its partition could never be opened again.
+      if (source === 'audit' && !dept) return json({ error: 'an audit needs its dept' }, 400)
       const note = body.note == null ? null : str(body.note)
-      const rows = await saveBuilding(env, caller, { id: crypto.randomUUID(), numeroDpe, note })
+      const rows = await saveBuilding(env, caller, {
+        id: crypto.randomUUID(),
+        source,
+        numeroDpe,
+        dept,
+        note,
+      })
       return json(rows[0] ?? null, 201)
     },
   },
@@ -231,16 +250,28 @@ async function serveObject(
     immutable ? 'public, max-age=31536000, immutable' : 'private, max-age=300',
   )
 
+  const asked = parseRange(request.headers.get('range'))
+
   if (request.method === 'HEAD') {
     const meta = await env.DATA.head(key)
     if (!meta) return json({ error: 'not found' }, 404)
     meta.writeHttpMetadata(headers)
     headers.set('etag', meta.httpEtag)
+    // TRAP: DuckDB-WASM opens a file with HEAD + `Range: bytes=0-` and reads it
+    // by ranges ONLY if that answers 206. A 200 -- what HTTP says a HEAD
+    // should get -- sends it down a fallback that GETs the whole file, 146 MB
+    // for one Paris certificate. See ADR-0035.
+    if (asked) {
+      const span = spanOf(asked, meta.size)
+      if (!span) return new Response(null, { status: 416, headers })
+      headers.set('content-range', `bytes ${span.start}-${span.start + span.length - 1}/${meta.size}`)
+      headers.set('content-length', String(span.length))
+      return new Response(null, { status: 206, headers })
+    }
     headers.set('content-length', String(meta.size))
     return new Response(null, { status: 200, headers })
   }
 
-  const asked = parseRange(request.headers.get('range'))
   let object: R2Object | R2ObjectBody | null
   try {
     object = await env.DATA.get(key, {
@@ -265,13 +296,10 @@ async function serveObject(
   }
 
   if (asked) {
-    const start = 'suffix' in asked ? Math.max(0, object.size - asked.suffix) : asked.offset
-    const length = Math.min(
-      'suffix' in asked ? asked.suffix : (asked.length ?? object.size - start),
-      object.size - start,
-    )
-    headers.set('content-range', `bytes ${start}-${start + length - 1}/${object.size}`)
-    headers.set('content-length', String(length))
+    const span = spanOf(asked, object.size)
+    if (!span) return new Response(null, { status: 416, headers })
+    headers.set('content-range', `bytes ${span.start}-${span.start + span.length - 1}/${object.size}`)
+    headers.set('content-length', String(span.length))
     return new Response(object.body, { status: 206, headers })
   }
   headers.set('content-length', String(object.size))
@@ -280,6 +308,14 @@ async function serveObject(
 
 /** What the client asked for, in R2's own shape but with nothing optional. */
 type Span = { offset: number; length?: number } | { suffix: number }
+
+/** Where a range lands in an object of `size` bytes; null if it starts past the end. */
+function spanOf(asked: Span, size: number): { start: number; length: number } | null {
+  const start = 'suffix' in asked ? Math.max(0, size - asked.suffix) : asked.offset
+  if (start >= size) return null
+  const length = Math.min('suffix' in asked ? asked.suffix : (asked.length ?? size - start), size - start)
+  return { start, length }
+}
 
 /**
  * `bytes=0-99` -> `{ offset: 0, length: 100 }`.

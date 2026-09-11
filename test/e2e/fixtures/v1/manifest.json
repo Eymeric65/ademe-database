@@ -1,8 +1,8 @@
 {
   "version": "v1",
-  "built_at": "2026-09-05T11:05:42+00:00",
+  "built_at": "2026-09-11T04:15:59+00:00",
   "schema_sha256": "62a7efcdfc5ac614c6038c47036c55ae3f3491d298d78bb09feadb2a860565c5",
-  "high_water": "2026-02-09",
+  "high_water": "2026-09-07",
   "column_meta": {
     "adresse_ban": {
       "encoding": "text",
@@ -280,8 +280,8 @@
       "destination": "dpe_generateur_ecs"
     },
     "conso_ef_generateur_n2_ecs_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_ecs"
     },
     "conso_ef_installation_ecs_n1": {
@@ -311,7 +311,7 @@
     },
     "coordonnee_cartographique_y_ban": {
       "encoding": "scaled",
-      "scale": 1000000,
+      "scale": 100,
       "destination": "dpe"
     },
     "cop_generateur_n1_ecs_n1": {
@@ -625,8 +625,8 @@
       "destination": "dpe_installation_chauffage"
     },
     "facteur_couverture_solaire_installation_chauffage_n2": {
-      "encoding": "int",
-      "scale": 1,
+      "encoding": "scaled",
+      "scale": 10,
       "destination": "dpe_installation_chauffage"
     },
     "facteur_couverture_solaire_n1": {
@@ -1154,6 +1154,7 @@
     "lat",
     "lon"
   ],
+  "key": "numero_dpe",
   "partitions": [
     {
       "dept": "09",
@@ -1163,13 +1164,13 @@
       "rows": 400,
       "search": {
         "path": "search/dept=09/part-0000.parquet",
-        "bytes": 18715,
-        "sha256": "3d99cd7b7a08b54b09d46e86d987a45e9fa0c76d5923b262c30ea06f71cf1d6a"
+        "bytes": 19273,
+        "sha256": "2fd1b1e69b0e7a53958df65db255bdfcf28b21c29c325018e8e3387d4273303f"
       },
       "dpe": {
         "path": "dpe/dept=09/part-0000.parquet",
-        "bytes": 176752,
-        "sha256": "4a1ebbe5bf10c1802cbb354a449ca3ce520529e3248fca1c21c0913ecea5da28"
+        "bytes": 188529,
+        "sha256": "0a03ef7521730fd2fa5740b21f10f703bf5f53dcf6fea182453fd592ad2fc929"
       }
     },
     {
@@ -1180,14 +1181,15 @@
       "rows": 400,
       "search": {
         "path": "search/dept=48/part-0000.parquet",
-        "bytes": 18883,
-        "sha256": "2ba13738cdc8a5edc5fd6692dff4c16ab02468b3450daf65cacf5a9a5e034bbc"
+        "bytes": 18776,
+        "sha256": "6154958023394007ddb73c063a87b8c5f6f589c72ecd968eefbe83995ce9ec4a"
       },
       "dpe": {
         "path": "dpe/dept=48/part-0000.parquet",
-        "bytes": 171178,
-        "sha256": "184f47510d0e904e9823b210b079dee756a47fb498c55140d70914b2493b0152"
+        "bytes": 186208,
+        "sha256": "d9a23519cb8211fec3df9d5e895b48393d0e5aab7dbca824920d08b5593a9186"
       }
     }
-  ]
+  ],
+  "sliced_from": "2026-09-11T04:15:59+00:00"
 }
