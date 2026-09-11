@@ -332,7 +332,13 @@ def _geopoint_rows(
         f" WHERE v.code IN ({marks})",
         codes,
     ).fetchall()
-    scale = 10**6
+    # TRAP: each column at its own recorded scale. The national builds found six
+    # decimals of x but two of y; dividing both by 10^6 put France off Africa.
+    # A column too precise to scale (0) holds ADEME's text.
+    xs, ys = (
+        conn.execute("SELECT scale FROM column_meta WHERE column_name = ?", (c,)).fetchone()[0]
+        for c in ("coordonnee_cartographique_x_ban", "coordonnee_cartographique_y_ban")
+    )
     # One departement per call, so the projection question is answered once.
     lambert = any(geo.is_lambert93(c) for c in codes)
     out = []
@@ -340,7 +346,9 @@ def _geopoint_rows(
         if x is None or y is None or not lambert:
             out.append((dpe_id, None, None))
             continue
-        lat, lon = geo.wgs84_for(codes[0], x / scale, y / scale)
+        lat, lon = geo.wgs84_for(
+            codes[0], x / xs if xs else float(x), y / ys if ys else float(y)
+        )
         out.append((dpe_id, lat, lon))
     return out
 

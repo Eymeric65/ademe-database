@@ -580,3 +580,41 @@ def test_metropolitan_coordinates_are_still_derived():
     # precision, not the arithmetic's.
     assert lat is not None and abs(lat - 42.91384797010697) < 1e-6
     assert lon is not None and abs(lon - 1.8297960439175422) < 1e-6
+
+
+def test_published_coordinates_read_each_column_at_its_own_scale(tmp_path):
+    """The live check of the national tree found every published latitude near
+    -5.86 degrees, France put off the coast of Africa. The export divided both
+    Lambert-93 columns by 10^6, and the national builds recorded x at 10^6 but
+    y at 10^2 (the sample never saw more than two decimals of y). The fixtures
+    above declare 10^6 for both, which is why nothing noticed.
+    """
+    path = tmp_path / "t.sqlite"
+    recorded = dict(SCALES, coordonnee_cartographique_y_ban=100)
+    schema.build(path, scales=recorded)
+    conn = db.connect(path, bulk=True)
+    ingest.Loader(conn, spec.load(recorded)).load_page(
+        [
+            _row(
+                "2409E0000001",
+                "09001",
+                "09",
+                coordonnee_cartographique_x_ban="604356.72",
+                coordonnee_cartographique_y_ban="6202312.65",
+            )
+        ]
+    )
+    conn.commit()
+    conn.close()
+
+    export_parquet.export(path, tmp_path / "out", ["09"])
+    lat, lon = (
+        duckdb.connect()
+        .execute(
+            "SELECT lat, lon FROM read_parquet(?, hive_partitioning = false)",
+            [str(tmp_path / "out" / export_parquet.VERSION / "dpe" / "dept=09" / "part-0000.parquet")],
+        )
+        .fetchone()
+    )
+    # ADEME's own `_geopoint` for this certificate (GEO_FIXTURES).
+    assert (round(float(lat), 6), round(float(lon), 6)) == (42.913848, 1.829796)
