@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 
 from ademe import api, spec
-from ademe.config import API
+from ademe.config import API, SCHEMA_JSON
 from ademe.mapping import INTERNAL_COLUMNS
 
 # The full header line of `lines?format=csv`, as served on 2026-09-10.
@@ -34,7 +34,7 @@ def _check(headers: list[str]) -> tuple[list[str], list[str], list[str]]:
     """(keys two headers land on, schema keys no header reaches, keys not in
     the schema) -- all empty when the labels match the export."""
     keys = [spec.csv_header_to_key().get(h, h) for h in headers]
-    schema = {f["key"] for f in spec._raw()} - INTERNAL_COLUMNS
+    schema = {f["key"] for f in spec._raw(SCHEMA_JSON)} - INTERNAL_COLUMNS
     collided = sorted({k for k in keys if keys.count(k) > 1})
     return collided, sorted(schema - set(keys)), sorted(set(keys) - schema)
 
@@ -47,7 +47,9 @@ def test_two_headers_landing_on_one_key_are_refused(monkeypatch):
     """The loss above was silent because a dict comprehension lets the second
     header overwrite the first. It has to be an error on the first page, not
     an empty column after seventeen hours."""
-    monkeypatch.setattr(spec, "csv_header_to_key", lambda: {"adresse_brut": "adresse_complete_brut"})
+    monkeypatch.setattr(
+        spec, "csv_header_to_key", lambda source=None: {"adresse_brut": "adresse_complete_brut"}
+    )
     with pytest.raises(ValueError, match="adresse_complete_brut"):
         spec.rename_row(
             {

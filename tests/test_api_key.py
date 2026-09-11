@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import importlib
 import os
+import shutil
+import subprocess
+import sys
 
 import pytest
 
@@ -70,26 +73,56 @@ def test_a_missing_dot_env_is_not_an_error(tmp_path):
     config._dotenv(tmp_path / "does-not-exist")
 
 
-def test_the_repo_root_dot_env_is_the_one_that_is_read(monkeypatch):
+def test_the_repo_root_dot_env_is_the_one_that_is_read(tmp_path):
     """The wiring, not the parser.
 
     `uv run` ignores `.env` unless you remember `--env-file` -- verified
     against uv 0.12.4, where a bare `uv run` reads nothing -- and forgetting it
     is silent: the ingest runs anonymously and takes twice as long. So the
-    config reads the file itself, at import, and this is the assertion that it
-    reads it from the right place. A probe variable rather than the real one,
-    so nothing here can perturb a parallel worker's key.
+    config reads the file itself, at import, and this asserts it reads the file
+    next to the package rather than some other one.
+
+    TRAP: this cannot be done by monkeypatching `config.REPO`. `REPO` is
+    `Path(__file__).resolve().parent.parent`, so `importlib.reload` recomputes
+    it from the module's own location and throws the patch away -- and
+    `.resolve()` means a symlinked copy resolves straight back to the real
+    repository. The package is therefore *copied* somewhere else and imported
+    from there, in a subprocess, which is the only arrangement where `REPO` is
+    genuinely somewhere a test may write.
+
+    The version of this test that shipped in #19 wrote a probe `.env` into the
+    real repository root and skipped when one already existed -- which is every
+    developer who has an API key, i.e. exactly the people the feature is for. A
+    skip is not a pass.
     """
-    env = config.REPO / ".env"
-    if env.exists():
-        pytest.skip("a real .env is present; refusing to overwrite it")
-    monkeypatch.delenv("ADEME_DOTENV_PROBE", raising=False)
-    env.write_text("ADEME_DOTENV_PROBE=reached\n")
-    try:
-        importlib.reload(config)
-    finally:
-        env.unlink()
-    assert os.environ.get("ADEME_DOTENV_PROBE") == "reached"
+    shutil.copytree(config.REPO / "ademe", tmp_path / "ademe")
+    (tmp_path / ".env").write_text("# probe\nADEME_API_KEY='from-the-copied-repo'\n")
+
+    env = {k: v for k, v in os.environ.items() if k != "ADEME_API_KEY"}
+    env["PYTHONPATH"] = str(tmp_path)
+    got = subprocess.run(
+        [sys.executable, "-c", "from ademe.config import API_KEY; print(API_KEY)"],
+        capture_output=True, text=True, env=env, cwd=tmp_path,
+    )
+    assert got.returncode == 0, got.stderr
+    assert got.stdout.strip() == "from-the-copied-repo", (
+        f"the config did not read the .env beside its own package: {got.stdout!r}"
+    )
+
+
+def test_a_repo_without_a_dot_env_reads_no_key(tmp_path):
+    """The other half, and the reason the test above is not vacuous: the same
+    copied package with no `.env` beside it must come back with nothing."""
+    shutil.copytree(config.REPO / "ademe", tmp_path / "ademe")
+
+    env = {k: v for k, v in os.environ.items() if k != "ADEME_API_KEY"}
+    env["PYTHONPATH"] = str(tmp_path)
+    got = subprocess.run(
+        [sys.executable, "-c", "from ademe.config import API_KEY; print(API_KEY)"],
+        capture_output=True, text=True, env=env, cwd=tmp_path,
+    )
+    assert got.returncode == 0, got.stderr
+    assert got.stdout.strip() == "None"
 
 
 @pytest.fixture(autouse=True)

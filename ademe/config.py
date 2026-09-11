@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -12,10 +13,36 @@ DEFAULT_DB = Path(
     os.environ.get("ADEME_DB", "/run/media/eymericchauchat/990 Pro/database/ademe.sqlite")
 )
 
-SCHEMA_JSON = REPO / "schema" / "ademe-schema.json"
+@dataclass(frozen=True)
+class Source:
+    """One ADEME dataset: where it is published, the schema that describes it,
+    the SQLite file it is built in and the Parquet tree it is published to.
+    See ADR-0017."""
 
-DATASET = "dpe03existant"
-API = f"https://data.ademe.fr/data-fair/api/v1/datasets/{DATASET}"
+    slug: str
+    dataset: str  # Data Fair id
+    schema_json: Path  # its labels drive the CSV header rename -- never another's
+    db_path: Path  # one file per source; two sources in one file corrupt both
+    subdir: str  # tree under v1/; "" is v1/ itself
+
+    @property
+    def api(self) -> str:
+        return f"https://data.ademe.fr/data-fair/api/v1/datasets/{self.dataset}"
+
+
+EXISTANT = Source(
+    slug="existant",
+    dataset="dpe03existant",
+    schema_json=REPO / "schema" / "ademe-schema.json",
+    db_path=DEFAULT_DB,
+    subdir="",
+)
+SOURCES = {s.slug: s for s in (EXISTANT,)}
+
+# Existing housing, under the names every module used before there was a second.
+SCHEMA_JSON = EXISTANT.schema_json
+DATASET = EXISTANT.dataset
+API = EXISTANT.api
 LICENCE = "Licence Ouverte 2.0 (Etalab)"
 
 
