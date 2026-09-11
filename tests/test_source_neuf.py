@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from ademe import api, db, export_parquet, ingest, mapping, reconstruct, schema, spec
+from ademe import api, db, export_parquet, finalise, ingest, mapping, reconstruct, schema, spec
 from ademe.config import SOURCES
 from tests.test_export_parquet import SCALES, _equal, _row
 
@@ -91,3 +91,32 @@ def test_a_new_housing_certificate_round_trips(tmp_path):
     bad = [c for c, v in rebuilt.items() if not _equal(c, v, published.get(c, ""), numeric)]
     assert not bad, bad[:10]
     assert published["deperditions_totales_batiment"] == "1234"
+
+
+def test_a_new_housing_build_finalises(tmp_path):
+    """The national new-housing build loaded all 1 424 502 certificates, then
+    `finalise` failed: `no such column: identifiant_ban`. Encodings follow each
+    dataset's cardinality (ADR-0025), and new housing has few enough BAN
+    identifiers for `identifiant_ban` to be a vocabulary, stored as
+    `identifiant_ban_id`. The index named the column as existing housing
+    stores it.
+    """
+    neuf = SOURCES["neuf"]
+    path = tmp_path / "neuf.sqlite"
+    schema.build(path, scales=SCALES, source=neuf)
+    conn = db.connect(path, bulk=True)
+    ingest.Loader(conn, spec.load(SCALES, source=neuf), source=neuf).load_page(
+        [_row("2409N0000001", "09001", "09")]
+    )
+    conn.commit()
+
+    assert finalise.finalise(conn, source=neuf) == 1
+    indexed = {
+        r[0]: r[1]
+        for r in conn.execute(
+            "SELECT il.name, ii.name FROM sqlite_master il, pragma_index_info(il.name) ii"
+            " WHERE il.type = 'index' AND il.tbl_name = 'adresse'"
+        )
+    }
+    assert indexed.get("ix_adresse_ban") == "identifiant_ban_id"
+    conn.close()
