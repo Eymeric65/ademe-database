@@ -93,3 +93,53 @@ def test_each_source_uploads_its_manifest_after_its_files():
         for kind in ("search", "dpe", "index"):
             line = re.search(rf"rclone copy out/v1/{re.escape(sub)}{kind}\s", text)
             assert line and line.start() < manifest, f"{sub or 'v1/'}{kind}"
+
+
+# CI deploys what it has just tested: dev to the stable preview host, main to
+# production. Same text-not-YAML reading as above.
+CI = WORKFLOW.parent / "ci.yml"
+
+
+def _ci_jobs() -> dict[str, str]:
+    """Each job in ci.yml, by name, as its text."""
+    jobs = CI.read_text(encoding="utf-8").split("\njobs:\n", 1)[1]
+    parts = re.split(r"^  ([\w-]+):\s*$", jobs, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2]))
+
+
+def test_ci_builds_every_push_to_dev_and_to_main():
+    """Production is deployed from main's own green run, so main is built."""
+    push = re.search(r"^  push:\n    branches: \[([^\]]*)\]", CI.read_text(encoding="utf-8"), re.M)
+    assert push and {b.strip() for b in push.group(1).split(",")} == {"dev", "main"}
+
+
+def test_a_push_run_is_never_cancelled_mid_deploy():
+    cancel = re.search(r"^  cancel-in-progress:\s*(.+?)\s*$", CI.read_text(encoding="utf-8"), re.M)
+    assert cancel and cancel.group(1) == "${{ github.event_name == 'pull_request' }}"
+
+
+def test_the_deploy_waits_for_every_other_job_and_runs_only_on_a_push():
+    jobs = _ci_jobs()
+    assert "deploy" in jobs, "ci.yml has no deploy job"
+    needs = re.search(r"^    needs:\s*\[([^\]]*)\]", jobs["deploy"], re.M)
+    assert needs and {n.strip() for n in needs.group(1).split(",")} == set(jobs) - {"deploy"}
+    assert re.search(r"^    if:\s*github\.event_name == 'push'\s*$", jobs["deploy"], re.M)
+
+
+def test_dev_deploys_the_preview_and_only_main_deploys_production():
+    """TRAP: a bare `wrangler deploy` ships the top-level config -- production's
+    D1 and recherche-maison.com. Run from dev, it would put every merge in front
+    of real users before anyone promoted it."""
+    deploys = {}
+    for name, job in _ci_jobs().items():
+        for step in re.split(r"^      - ", job, flags=re.M)[1:]:
+            run = re.search(r"run:\s*npx wrangler deploy\b(.*)$", step, re.M)
+            if not run:
+                continue
+            guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
+            assert guard, f"{name}: unguarded `wrangler deploy{run.group(1)}`"
+            deploys[(name, guard.group(1))] = run.group(1).strip()
+    assert deploys == {
+        ("deploy", "github.ref == 'refs/heads/dev'"): "--env preview",
+        ("deploy", "github.ref == 'refs/heads/main'"): "",
+    }
