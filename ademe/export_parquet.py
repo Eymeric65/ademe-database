@@ -4,7 +4,7 @@ Writes, per departement, a narrow search index and the full 226-column detail
 file, plus two side files and a manifest. The layout and the reasoning behind
 it are ADR-0006.
 
-The SELECT is GENERATED from `column_meta` and `mapping.REPEATS`, exactly as
+The SELECT is GENERATED from `column_meta` and the source's repeating groups, as
 `ademe/reconstruct.py` is. That is the whole point: a hand-written 226-column
 projection would drift from the schema the first time an encoding changed, and
 "lossless" would quietly stop being true for one column. Anything the schema
@@ -28,8 +28,7 @@ from pathlib import Path
 import duckdb
 
 from ademe import db, geo
-from ademe.config import DEFAULT_DB
-from ademe.mapping import REPEATS
+from ademe.config import DEFAULT_DB, EXISTANT, Source
 
 VERSION = "v1"
 
@@ -69,6 +68,13 @@ SEARCH_COLUMNS = (
 
 SEARCH_SORT = ("code_postal_ban", "etiquette_dpe", "surface_habitable_logement")
 
+# Per source, by slug, and deliberately with no default: a search index is a
+# product decision, and a tertiary DPE has no `surface_habitable_logement`.
+# See ADR-0018.
+SEARCH: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "existant": (SEARCH_COLUMNS, SEARCH_SORT),
+}
+
 # The overseas departements are three-digit codes with a few thousand rows
 # each. One partition each would mean four files a search has to consider for
 # no benefit; merged, they are one small file.
@@ -91,11 +97,11 @@ class Plan:
     """Where every source column comes from, and how to decode it.
 
     Built from `column_meta` -- the same table `reconstruct.Reconstructor`
-    reads -- plus REPEATS for the slot layout, which column_meta records only
-    per repeating group rather than per slot.
+    reads -- plus the source's repeating groups for the slot layout, which
+    column_meta records only per repeating group rather than per slot.
     """
 
-    def __init__(self, conn):
+    def __init__(self, conn, source: Source = EXISTANT):
         self.meta = {
             r["column_name"]: dict(r)
             for r in conn.execute("SELECT * FROM column_meta").fetchall()
@@ -111,7 +117,7 @@ class Plan:
         for col, m in self.meta.items():
             if m["destination"] in base:
                 self.alias[col] = base[m["destination"]]
-        for rep in REPEATS:
+        for rep in source.mapping.repeats:
             for slot in rep.slots():
                 a = _alias_for(rep.table, slot["outer"], slot["inner"])
                 for src in slot["src_to_dst"]:
@@ -157,9 +163,9 @@ class Plan:
         return f"CAST({qualified} AS VARCHAR)"
 
 
-def wide_select(conn, *, where: str = "TRUE") -> str:
+def wide_select(conn, *, where: str = "TRUE", source: Source = EXISTANT) -> str:
     """The full 226-column projection plus lat/lon, as one SELECT."""
-    plan = Plan(conn)
+    plan = Plan(conn, source)
     cols = [f'd.numero_dpe AS "numero_dpe"']
     for col in plan.meta:
         if col == "numero_dpe":
@@ -177,7 +183,7 @@ def wide_select(conn, *, where: str = "TRUE") -> str:
         "LEFT JOIN sq.dpe_adresse_brut br ON br.dpe_id = d.dpe_id",
         "LEFT JOIN geopoint g ON g.dpe_id = d.dpe_id",
     ]
-    for rep in REPEATS:
+    for rep in source.mapping.repeats:
         for slot in rep.slots():
             a = _alias_for(rep.table, slot["outer"], slot["inner"])
             on = [f"{a}.dpe_id = d.dpe_id", f"{a}.rang = {slot['outer']}"]
@@ -268,11 +274,25 @@ def _sha256(path: Path) -> str:
 
 
 def export(
-    db_path: Path, out_dir: Path, depts: list[str] | None = None, *, quiet: bool = True
+    db_path: Path,
+    out_dir: Path,
+    depts: list[str] | None = None,
+    *,
+    quiet: bool = True,
+    source: Source = EXISTANT,
 ) -> dict:
-    """Write every partition and the manifest. Returns the manifest."""
+    """Write every partition and the manifest to `out_dir/v1/<subdir>`.
+
+    Existing housing's subdir is empty, so its tree is `v1/` itself. Returns
+    the manifest."""
+    if source.slug not in SEARCH:
+        raise ValueError(
+            f"no search columns declared for source {source.slug!r};"
+            " add them to export_parquet.SEARCH (ADR-0018)"
+        )
+    search_columns, search_sort = SEARCH[source.slug]
     conn = db.connect(db_path)
-    root = Path(out_dir) / VERSION
+    root = Path(out_dir) / VERSION / source.subdir
     root.mkdir(parents=True, exist_ok=True)
 
     codes = depts or _departements(conn)
@@ -304,7 +324,7 @@ def export(
             duck.executemany("INSERT INTO geopoint VALUES (?, ?, ?)", rows)
 
         duck.execute(
-            f"CREATE OR REPLACE TEMP TABLE wide AS {wide_select(conn, where=where)}"
+            f"CREATE OR REPLACE TEMP TABLE wide AS {wide_select(conn, where=where, source=source)}"
         )
         n = duck.execute("SELECT COUNT(*) FROM wide").fetchone()[0]
         if not quiet:
@@ -319,8 +339,8 @@ def export(
             f"COPY (SELECT * FROM wide ORDER BY numero_dpe) TO '{dpe_path}'"
             f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {DPE_ROW_GROUP})"
         )
-        cols = ", ".join(f'"{c}"' for c in SEARCH_COLUMNS)
-        order = ", ".join(f'"{c}"' for c in SEARCH_SORT)
+        cols = ", ".join(f'"{c}"' for c in search_columns)
+        order = ", ".join(f'"{c}"' for c in search_sort)
         duck.execute(
             f"COPY (SELECT {cols} FROM wide ORDER BY {order}) TO '{search_path}'"
             f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {SEARCH_ROW_GROUP})"
@@ -381,13 +401,15 @@ def export(
         f" (FORMAT parquet, {COMPRESSION})"
     )
 
-    manifest = write_manifest(conn, root, partitions)
+    manifest = write_manifest(conn, root, partitions, search_columns)
     duck.close()
     conn.close()
     return manifest
 
 
-def write_manifest(conn, root: Path, partitions: list[dict]) -> dict:
+def write_manifest(
+    conn, root: Path, partitions: list[dict], search_columns: tuple[str, ...] = SEARCH_COLUMNS
+) -> dict:
     src = conn.execute("SELECT * FROM data_source").fetchone()
     high = conn.execute(
         "SELECT MAX(date_derniere_modification_dpe) FROM dpe"
@@ -417,7 +439,7 @@ def write_manifest(conn, root: Path, partitions: list[dict]) -> dict:
                 " ORDER BY column_name"
             )
         },
-        "search_columns": list(SEARCH_COLUMNS),
+        "search_columns": list(search_columns),
         "partitions": partitions,
     }
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
