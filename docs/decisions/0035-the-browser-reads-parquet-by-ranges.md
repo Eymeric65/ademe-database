@@ -89,8 +89,15 @@ After, same scenarios on the same preview:
 
 | scenario | requests | bytes | wall |
 |---|---|---|---|
-| search 75011, class D, 45 m² | AFTER | AFTER | AFTER |
-| detail of `2475E2178628K`, opened from its link | AFTER | AFTER | AFTER |
+| search 09000, class E, 176 m² (0.74 MB file, fetched whole) | 2 | 0.76 MB | 3.4 s, the engine's first load included |
+| search 75011, class D, 45 m² (15 MB file, by ranges) | 35 | 2.06 MB | 6.4 s |
+| detail of `2475E2178628K`, opened from its link | 16 | **8.1 MB** | **4.5 s** |
+
+The detail is the win: 152 MB to 8.1 MB, a footer and one row group. The Paris
+search is the cost: on fibre it is slower than its old whole-file read (6.4 s
+against about 4 s) while moving a seventh of the bytes, which is the better
+side of the trade on any slower link. `WHOLE_SEARCH` in `src/data/duck.ts` is
+the dial.
 
 ### Consequences
 
