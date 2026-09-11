@@ -145,15 +145,19 @@ def merge_partition(duck, base: Path | str, delta_dir: Path, dept: str, out: Pat
         dest = out / kind / f"dept={dept}" / "part-0000.parquet"
         dest.parent.mkdir(parents=True, exist_ok=True)
 
+        # TRAP: hive_partitioning = false on every SELECT *. The files live
+        # under `dept=NN/`, which DuckDB otherwise reads as a `dept` column,
+        # and this rewrite would store it: a 229th column the export never
+        # wrote, in every partition a weekly delta touches.
         duck.execute(
             f"""COPY (
                   SELECT {columns} FROM (
-                    SELECT * FROM read_parquet('{base_file}')
+                    SELECT * FROM read_parquet('{base_file}', hive_partitioning = false)
                     WHERE numero_dpe NOT IN (
                       SELECT numero_dpe FROM read_parquet('{delta_file}')
                     )
                     UNION ALL BY NAME
-                    SELECT * FROM read_parquet('{delta_file}')
+                    SELECT * FROM read_parquet('{delta_file}', hive_partitioning = false)
                   )
                   ORDER BY {order}
                 ) TO '{dest}'
@@ -376,8 +380,9 @@ def apply_deletions(root: Path | str, report: dict[str, Divergence], out: Path) 
                 _copy(src, dest)
                 continue
             ids = ", ".join(f"'{n}'" for n in gone)
+            # hive_partitioning = false, for the reason in merge_partition.
             duck.execute(
-                f"COPY (SELECT {columns} FROM read_parquet('{src}')"
+                f"COPY (SELECT {columns} FROM read_parquet('{src}', hive_partitioning = false)"
                 f" WHERE numero_dpe NOT IN ({ids}) ORDER BY {order}) TO '{dest}'"
                 f" (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE {row_group})"
             )
