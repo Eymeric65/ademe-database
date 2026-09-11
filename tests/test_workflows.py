@@ -63,6 +63,29 @@ def test_each_source_is_reconciled_and_checked_before_it_is_uploaded():
         assert where == sorted(where), slug
 
 
+def test_the_weekly_job_reads_the_published_trees_from_r2_not_the_public_domain():
+    """`data.recherche-maison.com` served the bucket to anyone, past the login
+    gate (ADR-0012). The weekly job read the published trees through it, so the
+    domain could not be removed without breaking the next Monday run. Each tree
+    is now downloaded from R2 with the job's own credentials, before its delta,
+    and the delta reads that copy. See ADR-0033.
+    """
+    text = _text()
+    assert "data.recherche-maison.com" not in text
+    assert "DATA_BASE_URL" not in text
+    for slug in SOURCES:
+        sub = SOURCES[slug].subdir
+        base = f"base/v1/{sub}".rstrip("/")
+        delta = (
+            text.index("uv run python -m ademe.delta \\")
+            if slug == "existant"
+            else text.index(f"ademe.delta --source {slug}")
+        )
+        fetch = re.search(rf"rclone copy(?:to)? r2:ademe-dpe/v1/{re.escape(sub)}\S* {re.escape(base)}", text)
+        assert fetch and fetch.start() < delta, f"{slug}: no download from R2 before its delta"
+        assert f'--base-url "{base}"' in text or f"--base-url {base}" in text, f"{slug}: delta not on the R2 copy"
+
+
 def test_each_source_uploads_its_manifest_after_its_files():
     text = _text()
     for sub in ["", *(f"{SOURCES[s].subdir}/" for s in _others())]:
