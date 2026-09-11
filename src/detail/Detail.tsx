@@ -4,6 +4,7 @@ import { buildings, detail, type Building, type Record_ } from '../data/duck'
 import { formatDate, SOURCE, type Source } from '../data/sources'
 import type { DetailRef } from '../routes'
 import { area, Badge } from '../search/Results'
+import { field, formatValue } from './fields'
 
 type Saved = { id: string; numeroDpe: string; source?: string }
 
@@ -42,6 +43,7 @@ export function Detail({ record }: { record: DetailRef }) {
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<Saved | null>(null)
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState<Set<string>>(() => new Set())
 
   useEffect(() => {
     let live = true
@@ -124,6 +126,13 @@ export function Detail({ record }: { record: DetailRef }) {
   const rank = (g: string) => (ORDER.includes(g) ? ORDER.indexOf(g) : ORDER.length)
   const ordered = [...groups.entries()].sort((a, b) => rank(a[0]) - rank(b[0]))
 
+  const explain = (key: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(key)) next.add(key)
+      return next
+    })
+
   return (
     <section>
       <p className="eyebrow">{src.label}</p>
@@ -156,12 +165,34 @@ export function Detail({ record }: { record: DetailRef }) {
         <div key={group} className="group">
           <h2>{title(group)}</h2>
           <dl className="facts">
-            {entries.map(([key, value]) => (
-              <div key={key} className="fact">
-                <dt>{key}</dt>
-                <dd>{render(value, rec.meta[key]?.encoding)}</dd>
-              </div>
-            ))}
+            {entries.map(([key, value]) => {
+              const f = field(key)
+              const shown = open.has(key)
+              return (
+                <div key={key} className="fact" data-key={key}>
+                  <dt title={key}>
+                    {f.label}
+                    {f.hint ? (
+                      <button
+                        type="button"
+                        className="fact-info"
+                        aria-expanded={shown}
+                        aria-label={`Explication : ${f.label}`}
+                        onClick={() => explain(key)}
+                      >
+                        ⓘ
+                      </button>
+                    ) : null}
+                  </dt>
+                  <dd>{formatValue(key, value, rec.meta[key]?.encoding)}</dd>
+                  {shown ? (
+                    <dd className="fact-hint">
+                      {f.hint} <span className="fact-key">Colonne ADEME : <code>{key}</code></span>
+                    </dd>
+                  ) : null}
+                </div>
+              )
+            })}
           </dl>
         </div>
       ))}

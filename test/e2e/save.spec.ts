@@ -38,7 +38,13 @@ test('the detail view shows a column only the wide file has', async ({ page }) =
   // conso_5_usages_ef is NOT in the 17-column search index. Seeing it is the
   // proof the detail read went to the wide file rather than reusing the row
   // already in memory -- which would look identical for every other field.
-  await expect(page.getByText('conso_5_usages_ef', { exact: false }).first()).toBeVisible()
+  const fact = page.locator('.fact[data-key="conso_5_usages_ef"]')
+  await expect(fact).toBeVisible()
+  // Named in French, in a unit, and able to say what it is for.
+  await expect(fact.locator('dt')).toContainText('Consommation totale')
+  await expect(fact.locator('dd').first()).toHaveText(/Wh\/an$/)
+  await fact.getByRole('button', { name: 'Explication' }).click()
+  await expect(fact.getByText(/cinq usages/)).toBeVisible()
 })
 
 test('the detail view shows no column the file path invented', async ({ page }) => {
@@ -48,12 +54,12 @@ test('the detail view shows no column the file path invented', async ({ page }) 
 
   // The wide file's own column first, so the count below runs on a loaded
   // detail and not on an empty page, where it would pass for nothing.
-  await expect(page.getByText('conso_5_usages_ef', { exact: false }).first()).toBeVisible({
+  await expect(page.locator('.fact[data-key="conso_5_usages_ef"]')).toBeVisible({
     timeout: 30_000,
   })
   // `dept` is not a column of the wide file. DuckDB derives it from the
   // `dept=09/` in the path unless told not to, and the detail lists every key.
-  await expect(page.locator('dt').filter({ hasText: /^dept$/ })).toHaveCount(0)
+  await expect(page.locator('.fact[data-key="dept"]')).toHaveCount(0)
 })
 
 test('a certificate opened by its bare numero is found, and dated by the day', async ({ page }) => {

@@ -887,6 +887,7 @@ h1 {
 
 .fact {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
   justify-content: space-between;
   padding: 0.28rem 0;
@@ -895,8 +896,7 @@ h1 {
 }
 
 .fact dt {
-  /* Raw ADEME column names. Monospace is not a costume here: they are
-     identifiers, and they line up. */
+  /* The column's French name; its ADEME key is in the title and the hint. */
   font-size: 0.76rem;
   color: var(--color-muted);
   min-width: 0;
@@ -908,6 +908,31 @@ h1 {
   text-align: right;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+.fact-info {
+  margin-left: 0.3rem;
+  padding: 0 0.2rem;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* Under the row, full width: `.fact .fact-hint` to outrank `.fact dd`. */
+.fact .fact-hint {
+  flex-basis: 100%;
+  text-align: left;
+  font-size: 0.8rem;
+  font-variant-numeric: normal;
+  color: var(--color-muted);
+}
+
+.fact-key code {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
 }
 
 /* Which tree the record came from, above its address. */
