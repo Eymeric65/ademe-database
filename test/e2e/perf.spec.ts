@@ -4,18 +4,24 @@ import { signUpViaApi, uniqueEmail } from './helpers'
 /**
  * What a search and a detail cost, measured through the browser that pays.
  *
- * The guard is that no Parquet file is ever fetched whole. DuckDB-WASM falls
- * back to a plain GET of the entire file when it doubts the server's ranges,
- * and nothing on screen changes -- the national tree made that 146 MB for one
- * Paris certificate (ADR-0035). Against a deployed preview (E2E_BASE_URL) the
- * same specs read the national tree and print the numbers the ADR records.
+ * The guard is that no wide or reference file is ever fetched whole. DuckDB
+ * falls back to a plain GET of the entire file when it doubts the server's
+ * ranges, and nothing on screen changes -- the national tree made that 146 MB
+ * for one Paris certificate (ADR-0035). A small search file IS fetched whole,
+ * on purpose and once. Against a deployed preview (E2E_BASE_URL) the same
+ * specs read the national tree and print the numbers the ADR records.
  */
 
 const NATIONAL = Boolean(process.env.E2E_BASE_URL)
 
-const SEARCH = NATIONAL
+// Paris's search file is 15 MB, over the whole-fetch limit, so it is read by
+// ranges; the fixture has nothing that large.
+const LARGE = NATIONAL
   ? { codePostal: '75011', classe: 'D', surface: '45', address: /Paris/ }
   : { codePostal: '09000', classe: 'E', surface: '176', address: /Quartier de la Gare/ }
+
+// Ariège's is under a megabyte nationally, and a few kB in the fixture.
+const SMALL = { codePostal: '09000', classe: 'E', surface: '176', address: /Quartier de la Gare/ }
 
 const DETAIL = NATIONAL
   ? { numero: '2475E2178628K', dept: '75', address: '3 Rue Mercoeur 75011 Paris' }
@@ -23,7 +29,7 @@ const DETAIL = NATIONAL
 
 type Tally = {
   requests: number
-  /** GETs of a Parquet file answered 200: the whole file, not a range. */
+  /** GETs of a wide or reference Parquet file answered 200: the whole file. */
   full: number
   bytes: number
   byPath: Record<string, number>
@@ -39,7 +45,8 @@ function track(page: Page): Tally {
     tally.requests += 1
     const kind = url.pathname.replace(/^\/data\/v1\//, '').replace(/dept=[^/]+\/.*/, 'dept=*')
     tally.byPath[kind] = (tally.byPath[kind] ?? 0) + 1
-    if (req.method() === 'GET' && url.pathname.endsWith('.parquet') && res.status() === 200) {
+    const whole = req.method() === 'GET' && res.status() === 200
+    if (whole && url.pathname.endsWith('.parquet') && !url.pathname.includes('/search/')) {
       tally.full += 1
     }
     void Promise.all([req.sizes(), req.allHeaders()]).then(([s, headers]) => {
@@ -59,19 +66,31 @@ async function report(info: TestInfo, name: string, tally: Tally, ms: number) {
   await info.attach(name, { body: JSON.stringify(line, null, 2), contentType: 'application/json' })
 }
 
-test('a postcode search reads ranges, never a whole file', async ({ page }, info) => {
-  await signUpViaApi(page, uniqueEmail('perf-search'))
+async function searchFor(page: Page, info: TestInfo, name: string, t: typeof SMALL) {
+  await signUpViaApi(page, uniqueEmail(`perf-${name}`))
   await page.goto('/')
   // The engine is fetched once per browser and is not the data plane's cost.
   const tally = track(page)
-
-  await page.getByLabel('Code postal').fill(SEARCH.codePostal)
-  await page.getByLabel('Classe énergie').selectOption(SEARCH.classe)
-  await page.getByLabel('Surface (m²)').fill(SEARCH.surface)
+  await page.getByLabel('Code postal').fill(t.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(t.classe)
+  await page.getByLabel('Surface (m²)').fill(t.surface)
   const start = Date.now()
   await page.getByRole('button', { name: 'Rechercher' }).click()
-  await expect(page.getByText(SEARCH.address).first()).toBeVisible({ timeout: 80_000 })
-  await report(info, 'search', tally, Date.now() - start)
+  // Inside the results: the Département select also says "75 Paris".
+  await expect(page.locator('.hit-address').getByText(t.address).first()).toBeVisible({
+    timeout: 80_000,
+  })
+  await report(info, name, tally, Date.now() - start)
+  return tally
+}
+
+test('a search in a small département fetches its partition once', async ({ page }, info) => {
+  const tally = await searchFor(page, info, 'search-small', SMALL)
+  expect(tally.byPath['search/dept=*'], tally.log.join('\n')).toBe(1)
+})
+
+test('a search in a large département reads ranges, never a whole file', async ({ page }, info) => {
+  const tally = await searchFor(page, info, 'search-large', LARGE)
   expect(tally.full, tally.log.join('\n')).toBe(0)
 })
 

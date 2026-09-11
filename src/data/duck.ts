@@ -168,13 +168,51 @@ export async function partitionsFor(spec: QuerySpec): Promise<string[]> {
     : []
 }
 
+/**
+ * A search file at or under this size is fetched whole, in one request;
+ * above it, DuckDB reads it by ranges. Each range read is a sequential round
+ * trip of ~150 ms, so a Paris search (15 MB) is 35 of them and 2 MB, while a
+ * typical département's 3 MB is one. See ADR-0035.
+ */
+const WHOLE_SEARCH = 4 * 1024 * 1024
+const MAX_BUFFERS = 6
+const buffers = new Map<string, Promise<string>>()
+
+/** What DuckDB should read for one partition's search file: a buffer or a URL. */
+async function searchFile(subdir: string, p: Partition): Promise<string> {
+  const path = p.search?.path ?? `search/dept=${p.dept}/part-0000.parquet`
+  const url = `${tree(subdir)}/${path}`
+  if (!p.search || p.search.bytes > WHOLE_SEARCH) return url
+
+  let pending = buffers.get(url)
+  if (!pending) {
+    pending = (async () => {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error(`${path}: ${res.status}`)
+      // The name keeps `/dept=XX/`, which is how a hit knows its partition.
+      const name = `${subdir || 'existant'}/${path}`
+      await (await db()).registerFileBuffer(name, new Uint8Array(await res.arrayBuffer()))
+      return name
+    })()
+    pending.catch(() => buffers.delete(url))
+    buffers.set(url, pending)
+    // A session that wanders through départements should not hold them all.
+    while (buffers.size > MAX_BUFFERS) {
+      const [oldest, name] = buffers.entries().next().value as [string, Promise<string>]
+      buffers.delete(oldest)
+      void name.then(async (n) => (await db()).dropFile(n)).catch(() => undefined)
+    }
+  }
+  return pending
+}
+
 export async function search(spec: QuerySpec): Promise<Hit[]> {
   const src = SOURCE[spec.source ?? 'existant']
   const m = await manifest(src.subdir)
   const depts = await partitionsFor(spec)
-  const files = m.partitions
-    .filter((p) => depts.includes(p.dept))
-    .map((p) => `${tree(src.subdir)}/${p.search?.path ?? `search/dept=${p.dept}/part-0000.parquet`}`)
+  const files = await Promise.all(
+    m.partitions.filter((p) => depts.includes(p.dept)).map((p) => searchFile(src.subdir, p)),
+  )
   if (!files.length) return []
   const { sql, params } = searchQuery(src, spec, files)
   return (await query(sql, params)).map((row) => toHit(src, row))
