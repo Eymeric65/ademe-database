@@ -1,0 +1,791 @@
+/*
+ * Hand-written, and staying that way: no Tailwind, no component library.
+ *
+ * Two palettes live here and they do different jobs.
+ *
+ * The first is the official DPE ramp from the French arrêté -- the same colours
+ * printed on every listing. It is DATA COLOUR, never re-themed, never dimmed in
+ * dark mode: a letter always appears in its own band, so the page and the paper
+ * certificate agree. It is also the only saturated thing on the page.
+ *
+ * The second is the house palette, carried over from the studio's other work: a
+ * two-ink spot-colour print job. Prussian blue leads because it sits furthest
+ * from the ramp's yellows and reds, so the certificate stays the loud thing.
+ * Vermilion is the seal -- a hanko stamp, used where somebody marks a document
+ * as theirs, and for errors. Sumi ink on washi paper underneath.
+ *
+ * Three tiers, in the order they cascade: primitives (the only literals),
+ * semantics (all any rule may name), then the rules.
+ */
+
+/* --- tier 1: primitives, the only literal colours ------------------------ */
+
+:root {
+  /* Sumi + washi, a warm ramp rather than a grey one. */
+  --neutral-0: #f4f0e6;
+  --neutral-50: #ece5d6;
+  --neutral-100: #e4dcc9;
+  --neutral-200: #d7ceba;
+  --neutral-400: #a99e8c;
+  --neutral-600: #6c6254;
+  --neutral-800: #322d23;
+  --neutral-900: #221d16;
+  --neutral-950: #15120d;
+
+  /* Prussian blue -- "bero-ai", the blue of the blueprint. */
+  --prussian-ink: #1f4e79;
+  --prussian-ink-dark: #63a2d8;
+  --prussian-soft: #dae4ef;
+  --prussian-soft-dark: #17324a;
+
+  /* Vermilion -- "shu", the ink of the seal. */
+  --vermilion-ink: #b83a20;
+  --vermilion-ink-dark: #ea7150;
+  --vermilion-soft: #f1d9ce;
+  --vermilion-soft-dark: #38190f;
+
+  /* Type set ON an ink block: paper on a light-mode ink, sumi on a bright one. */
+  --ink-contrast-light: #faf7f0;
+  --ink-contrast-dark: #17140e;
+
+  /* The A-G ramp, from the arrêté. Only ever applied to a letter. */
+  --dpe-a: #319834;
+  --dpe-b: #33cc31;
+  --dpe-c: #cbfc34;
+  --dpe-d: #fbfe06;
+  --dpe-e: #fbcc05;
+  --dpe-f: #fc9934;
+  --dpe-g: #fc0205;
+
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Fira Code', Menlo, Consolas,
+    monospace;
+
+  /* Corners stay crisp: printed matter, not a SaaS pill. */
+  --radius: 3px;
+  --radius-tight: 2px;
+}
+
+/* --- tier 2: semantics, the only names a rule below may use -------------- */
+
+:root {
+  --color-bg: var(--neutral-0);
+  --color-surface: var(--neutral-50);
+  --color-border: var(--neutral-200);
+  --color-text: var(--neutral-900);
+  --color-muted: var(--neutral-600);
+
+  --color-accent: var(--prussian-ink);
+  --color-accent-soft: var(--prussian-soft);
+  --color-accent-contrast: var(--ink-contrast-light);
+
+  --ink-vermilion: var(--vermilion-ink);
+  --ink-vermilion-soft: var(--vermilion-soft);
+  --ink-contrast: var(--ink-contrast-light);
+
+  /* The offset a stamp casts. Mixed toward the fixed sumi primitive so it stays
+     darker than whichever ink is on top of it, in both schemes. */
+  --stamp: color-mix(in oklab, var(--color-accent) 45%, var(--neutral-900));
+  --stamp-seal: color-mix(in oklab, var(--ink-vermilion) 55%, var(--neutral-900));
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: var(--neutral-950);
+    --color-surface: var(--neutral-900);
+    --color-border: var(--neutral-800);
+    --color-text: var(--neutral-50);
+    --color-muted: var(--neutral-400);
+
+    --color-accent: var(--prussian-ink-dark);
+    --color-accent-soft: var(--prussian-soft-dark);
+    --color-accent-contrast: var(--ink-contrast-dark);
+
+    --ink-vermilion: var(--vermilion-ink-dark);
+    --ink-vermilion-soft: var(--vermilion-soft-dark);
+    --ink-contrast: var(--ink-contrast-dark);
+  }
+}
+
+/* --- the display face ---------------------------------------------------- */
+
+/*
+ * Fraunces, self-hosted, roman only, latin subset. 67 kB.
+ *
+ * The unicode-range is not decoration: it is what keeps the browser from
+ * fetching the file for a page of digits. French sits inside it -- the accents
+ * are Latin-1, and the two that are not are named explicitly (U+0152-0153 for
+ * the ligature in "cœur", U+2019 for the apostrophe this app's copy uses).
+ */
+@font-face {
+  font-family: 'Fraunces';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('/fonts/fraunces-roman-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC,
+    U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215,
+    U+FEFF, U+FFFD;
+}
+
+/* --- base ---------------------------------------------------------------- */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: 16px/1.6 var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * A press of grain over the whole page, so the washi reads as paper rather than
+ * as a beige rectangle. Multiply on light, screen on dark; never in the way.
+ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  pointer-events: none;
+  opacity: 0.13;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@media (prefers-color-scheme: dark) {
+  body::after {
+    opacity: 0.06;
+    mix-blend-mode: screen;
+  }
+}
+
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-weight: 620;
+  letter-spacing: -0.015em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-tight);
+}
+
+/*
+ * The printer's mark: the small mechanical voice for labels, counts, column
+ * names and controls. It carries every piece of text on this page that names a
+ * field rather than saying something.
+ */
+.nav a,
+.field label,
+.count,
+.hint,
+.signin,
+.link,
+.group h2,
+.fact dt,
+.hit-meta,
+.hit-map,
+.badge {
+  font-family: var(--font-mono);
+}
+
+/* --- masthead ----------------------------------------------------------- */
+
+.masthead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  padding: 0.85rem 1.25rem;
+  background: color-mix(in srgb, var(--color-bg) 90%, transparent);
+  backdrop-filter: blur(8px);
+  /* Two-colour registration: the sumi rule, and the accent printed a hair
+     below it the way a second plate lands. */
+  border-bottom: 1px solid color-mix(in oklab, var(--color-text) 55%, transparent);
+  box-shadow: 0 2px 0 -1px var(--color-accent);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: inherit;
+  text-decoration: none;
+  font-family: var(--font-display);
+  font-weight: 620;
+  font-size: 1.05rem;
+  letter-spacing: -0.015em;
+}
+
+/* The one bold element on the page. Everything around it stays quiet. */
+.badge {
+  display: grid;
+  place-items: center;
+  width: 1.65rem;
+  height: 1.65rem;
+  border-radius: var(--radius-tight);
+  font-weight: 700;
+  font-size: 0.9rem;
+  /* The D band is a light yellow; black type is the legible pairing, and it is
+     what the printed label uses. */
+  color: #14180f;
+  background: var(--dpe-d);
+  box-shadow: 2px 2px 0 0 color-mix(in oklab, var(--neutral-900) 45%, transparent);
+}
+
+.badge[data-letter='A'] { background: var(--dpe-a); color: #fff; }
+.badge[data-letter='B'] { background: var(--dpe-b); }
+.badge[data-letter='C'] { background: var(--dpe-c); }
+.badge[data-letter='D'] { background: var(--dpe-d); }
+.badge[data-letter='E'] { background: var(--dpe-e); }
+.badge[data-letter='F'] { background: var(--dpe-f); }
+.badge[data-letter='G'] { background: var(--dpe-g); color: #fff; }
+
+.nav {
+  display: flex;
+  gap: 1.25rem;
+  margin-right: auto;
+}
+
+.nav a {
+  position: relative;
+  color: var(--color-muted);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+
+.nav a:hover {
+  color: var(--color-text);
+}
+
+.nav a[aria-current='page'] {
+  color: var(--color-accent);
+}
+
+.nav a[aria-current='page']::after {
+  content: '';
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--color-accent);
+}
+
+/*
+ * The masthead's copy of the stamp is deliberately smaller than the one in the
+ * page. Two full-size blue blocks on one screen is two things asking to be
+ * pressed; the gate's CTA is the one that should win.
+ */
+.masthead .signin {
+  font-size: 0.7rem;
+  padding: 0.45rem 0.75rem;
+  box-shadow: 3px 3px 0 0 var(--stamp);
+}
+
+.masthead .signin:hover:not([disabled]) {
+  transform: translate(1.5px, 1.5px);
+  box-shadow: 1.5px 1.5px 0 0 var(--stamp);
+}
+
+.masthead .signin:active:not([disabled]) {
+  transform: translate(3px, 3px);
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  /* Reserve the row so the header does not jump when /api/me answers. */
+  min-height: 2.25rem;
+}
+
+.who {
+  color: var(--color-muted);
+  font-size: 0.9rem;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- the ink stamp ------------------------------------------------------- */
+
+/*
+ * A flat block of ink with a hard offset behind it and no blur at all, which is
+ * how a rubber stamp lands slightly off its own shadow. Pressing it closes the
+ * gap; holding it flattens the shadow entirely.
+ */
+.signin {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  padding: 0.62rem 1rem;
+  border: 0;
+  border-radius: var(--radius-tight);
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  cursor: pointer;
+  box-shadow: 5px 5px 0 0 var(--stamp);
+  transition:
+    transform 0.13s ease,
+    box-shadow 0.13s ease;
+}
+
+.signin:hover:not([disabled]) {
+  transform: translate(2px, 2px);
+  box-shadow: 3px 3px 0 0 var(--stamp);
+}
+
+.signin:active:not([disabled]) {
+  transform: translate(5px, 5px);
+  box-shadow: 0 0 0 0 var(--stamp);
+}
+
+.signin[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: 5px 5px 0 0 color-mix(in oklab, var(--stamp) 40%, transparent);
+}
+
+/*
+ * The seal. Vermilion is reserved for the act of marking a document as yours --
+ * which is what a hanko is for, and what this button does.
+ */
+.signin.seal {
+  background: var(--ink-vermilion);
+  color: var(--ink-contrast);
+  box-shadow: 5px 5px 0 0 var(--stamp-seal);
+}
+
+.signin.seal:hover:not([disabled]) {
+  box-shadow: 3px 3px 0 0 var(--stamp-seal);
+}
+
+.signin.seal:active:not([disabled]) {
+  box-shadow: 0 0 0 0 var(--stamp-seal);
+}
+
+/* An index-entry link: the rule draws itself rather than sitting there. */
+.link {
+  position: relative;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0 0 2px;
+  border: 0;
+  background: none;
+  color: var(--color-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.link::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 1px;
+  background: currentColor;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
+}
+
+.link:hover {
+  color: var(--color-text);
+}
+
+.link:hover::before,
+.link:focus-visible::before {
+  transform: scaleX(1);
+}
+
+/* --- content ------------------------------------------------------------ */
+
+main {
+  position: relative;
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 5rem;
+}
+
+h1 {
+  margin: 0 0 0.75rem;
+  font-size: clamp(1.9rem, 1.35rem + 2.2vw, 3rem);
+  line-height: 1.06;
+  max-width: 18ch;
+  /* Even line lengths instead of one short orphan line. */
+  text-wrap: balance;
+}
+
+.lede {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 1.05rem;
+  max-width: 52ch;
+}
+
+/* --- the gate ------------------------------------------------------------ */
+
+/*
+ * The signed-out screen, and the one place this design spends its boldness.
+ *
+ * The hero is the label itself: the seven-band staircase every French listing
+ * prints, in the arrêté's own colours, each band pointing right and widening
+ * toward G. It is the artifact the whole product is about, so it is what a
+ * visitor should see first -- not a stock illustration of a house.
+ */
+.gate {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  align-items: center;
+  gap: clamp(1.5rem, 5vw, 4rem);
+  /* It is the only thing on the page, so it occupies the page rather than
+     sitting in the top third of one. 11.5rem is the masthead plus main's own
+     padding; the floor keeps it sane on a landscape phone. */
+  min-height: max(22rem, calc(100dvh - 11.5rem));
+}
+
+.ladder {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.rung {
+  width: var(--w);
+  min-width: 4.5rem;
+  padding: 0.32rem 0.7rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.92rem;
+  color: #14180f;
+  /* The chevron the printed label uses; the point is what makes it read as a
+     scale rather than as a bar chart. */
+  clip-path: polygon(0 0, calc(100% - 0.6rem) 0, 100% 50%, calc(100% - 0.6rem) 100%, 0 100%);
+}
+
+.rung[data-letter='A'] { background: var(--dpe-a); color: #fff; }
+.rung[data-letter='B'] { background: var(--dpe-b); }
+.rung[data-letter='C'] { background: var(--dpe-c); }
+.rung[data-letter='D'] { background: var(--dpe-d); }
+.rung[data-letter='E'] { background: var(--dpe-e); }
+.rung[data-letter='F'] { background: var(--dpe-f); }
+.rung[data-letter='G'] { background: var(--dpe-g); color: #fff; }
+
+.gate .actions {
+  margin: 1.75rem 0 0.75rem;
+}
+
+@media (max-width: 46rem) {
+  .gate {
+    grid-template-columns: 1fr;
+  }
+  /* Below the copy, and quieter: on a phone the ladder is a footnote to the
+     sentence, not the other way round. */
+  .ladder {
+    order: 2;
+    max-width: 20rem;
+  }
+}
+
+@media (max-width: 40rem) {
+  /*
+   * Two rows: identity and account on the first, navigation on the second.
+   * With one flex row and a 2rem gap the sign-in block was wide enough to wrap
+   * on its own, which left the nav stranded on a third row below it.
+   */
+  .masthead {
+    flex-wrap: wrap;
+    gap: 0.6rem 1rem;
+    padding: 0.75rem 1rem;
+  }
+  .wordmark {
+    margin-right: auto;
+  }
+  .account {
+    order: 2;
+  }
+  .nav {
+    order: 3;
+    width: 100%;
+    margin-right: 0;
+    gap: 1rem;
+  }
+  /* The address bar is not the place for an email. "Se déconnecter" already
+     says somebody is signed in, and dropping it is what keeps the header two
+     rows instead of three. */
+  .who {
+    display: none;
+  }
+  main {
+    padding: 2rem 1rem 4rem;
+  }
+}
+
+/* --- search -------------------------------------------------------------- */
+
+/* A card of index stock laid on the paper, offset shadow and all. */
+.search {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.9rem 1.1rem;
+  margin: 2rem 0 0;
+  padding: 1.35rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 -1px color-mix(in oklab, var(--color-accent) 22%, transparent);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.13em;
+  color: var(--color-muted);
+}
+
+.field input,
+.field select {
+  font: inherit;
+  padding: 0.5rem 0.6rem;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-tight);
+  transition: border-color 0.15s ease;
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: color-mix(in oklab, var(--color-accent) 45%, var(--color-border));
+}
+
+.actions {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.hint,
+.count {
+  margin: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--color-muted);
+}
+
+.error {
+  /* Its own ink, not the G band. Error red and "this dwelling is a heat sink"
+     were the same token until now, which made one of them a lie. */
+  color: var(--ink-vermilion);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  letter-spacing: 0;
+}
+
+.count {
+  margin: 2.5rem 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-weight: 600;
+}
+
+.hits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/*
+ * An entry in a printed index. The accent rail draws itself on hover rather
+ * than the row lifting: fifty rows that each lift is a page that shivers.
+ */
+.hit {
+  display: flex;
+  gap: 1rem;
+  padding: 0.9rem 0 0.9rem 0.85rem;
+  border-top: 1px solid var(--color-border);
+  box-shadow: inset 3px 0 0 -3px var(--color-accent);
+  transition:
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.hit:hover {
+  background: color-mix(in oklab, var(--color-surface) 60%, transparent);
+  box-shadow: inset 3px 0 0 0 var(--color-accent);
+}
+
+.hit .link {
+  margin-left: auto;
+  align-self: center;
+}
+
+.hit-labels {
+  display: flex;
+  gap: 0.35rem;
+  padding-top: 0.15rem;
+}
+
+.badge-unknown {
+  background: var(--color-border);
+  color: var(--color-muted);
+}
+
+.hit-body {
+  min-width: 0;
+}
+
+.hit-address {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.hit-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.76rem;
+  letter-spacing: 0.03em;
+  color: var(--color-muted);
+}
+
+.hit-map {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: var(--color-accent);
+  text-decoration-color: color-mix(in oklab, var(--color-accent) 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.hit-map:hover {
+  text-decoration-color: currentColor;
+}
+
+/* --- detail -------------------------------------------------------------- */
+
+.hit-address a,
+.group a {
+  color: inherit;
+  text-decoration-color: var(--color-border);
+  text-underline-offset: 3px;
+}
+
+.hit-address a:hover {
+  text-decoration-color: var(--color-accent);
+}
+
+.group {
+  margin-top: 2.5rem;
+}
+
+.group h2 {
+  margin: 0 0 0.6rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--color-accent);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 0.4rem;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.15rem 1.5rem;
+  margin: 0;
+}
+
+.fact {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  padding: 0.28rem 0;
+  font-size: 0.88rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-border) 45%, transparent);
+}
+
+.fact dt {
+  /* Raw ADEME column names. Monospace is not a costume here: they are
+     identifiers, and they line up. */
+  font-size: 0.76rem;
+  color: var(--color-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fact dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* --- motion -------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+  .signin:hover:not([disabled]),
+  .signin:active:not([disabled]) {
+    transform: none;
+  }
+  .link::before {
+    transform: scaleX(1);
+  }
+}

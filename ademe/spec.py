@@ -21,12 +21,14 @@ import json
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 from ademe.config import (
     CLOSED_VOCAB_MAX,
+    EXISTANT,
     OPEN_DICT_MAX,
-    SCHEMA_JSON,
     SLOT_UNION_MAX,
+    Source,
 )
 
 CLOSED_VOCAB_MAX_UNION = SLOT_UNION_MAX
@@ -96,8 +98,8 @@ def _stem(key: str) -> tuple[str, bool, bool]:
     return (_ALIASES.get(stem, stem) or key), had_slot, aliased
 
 
-@lru_cache(maxsize=1)
-def _domains() -> dict[str, str]:
+@lru_cache(maxsize=None)
+def _domains(schema_json: Path) -> dict[str, str]:
     """column -> vocabulary domain, resolved with a view of every column.
 
     Precedence matters. An explicit alias is a verified semantic claim and wins
@@ -105,7 +107,7 @@ def _domains() -> dict[str, str]:
     onto `type_energie` was silently undone and the energy list split across two
     tables. The collision suffix is only for *accidental* stem matches.
     """
-    stems = {f["key"]: _stem(f["key"]) for f in _raw()}
+    stems = {f["key"]: _stem(f["key"]) for f in _raw(schema_json)}
     slot_stems = {s for s, had, _ in stems.values() if had}
     out: dict[str, str] = {}
     for key, (stem, had_slot, aliased) in stems.items():
@@ -118,14 +120,20 @@ def _domains() -> dict[str, str]:
     return out
 
 
-def domain_of(key: str) -> str:
-    return _domains().get(key) or key
+def domain_of(key: str, source: Source = EXISTANT) -> str:
+    return _domains(source.schema_json).get(key) or key
 
 
-def _encoding(f: dict, scales: dict[str, int]) -> tuple[str, str | None, int]:
+def _encoding(f: dict, scales: dict[str, int], source: Source) -> tuple[str, str | None, int]:
     key, typ, fmt = f["key"], f.get("type"), f.get("format")
     card = f.get("x-cardinality")
 
+    # TRAP: the record key is stored raw in dpe's own NOT NULL column
+    # (ddl.dpe_ddl), whatever its cardinality. Below the dictionary threshold --
+    # new housing's 1.42M certificates -- it would otherwise be recorded as a
+    # vocabulary column that does not exist. See ADR-0025 and ADR-0029.
+    if key == source.mapping.key:
+        return TEXT, None, 1
     if fmt == "date":
         return DATE, None, 1
     if typ in ("number", "integer"):
@@ -138,23 +146,25 @@ def _encoding(f: dict, scales: dict[str, int]) -> tuple[str, str | None, int]:
     if card is None or card > OPEN_DICT_MAX:
         return TEXT, None, 1
     if card <= CLOSED_VOCAB_MAX:
-        return VOCAB_CLOSED, domain_of(key), 1
-    return VOCAB_OPEN, domain_of(key), 1
+        return VOCAB_CLOSED, domain_of(key, source), 1
+    return VOCAB_OPEN, domain_of(key, source), 1
 
 
-@lru_cache(maxsize=1)
-def _raw() -> list[dict]:
-    return json.loads(SCHEMA_JSON.read_text(encoding="utf-8"))
+# One entry per schema file, not one slot: several sources are read in one
+# process, and a single slot would hand each the last one read.
+@lru_cache(maxsize=None)
+def _raw(schema_json: Path) -> list[dict]:
+    return json.loads(schema_json.read_text(encoding="utf-8"))
 
 
-def load(scales: dict[str, int] | None = None) -> dict[str, Column]:
+def load(scales: dict[str, int] | None = None, *, source: Source = EXISTANT) -> dict[str, Column]:
     """Column specs. `scales` comes from `ademe.scales` once discovered;
     without it every numeric column falls back to unscaled INTEGER, which is
     lossy for decimals -- so ingest requires it."""
     scales = scales or {}
     out: dict[str, Column] = {}
-    for f in _raw():
-        enc, dom, sc = _encoding(f, scales)
+    for f in _raw(source.schema_json):
+        enc, dom, sc = _encoding(f, scales, source)
         out[f["key"]] = Column(
             key=f["key"],
             type=f.get("type", "string"),
@@ -168,25 +178,40 @@ def load(scales: dict[str, int] | None = None) -> dict[str, Column]:
     return out
 
 
-@lru_cache(maxsize=1)
-def csv_header_to_key() -> dict[str, str]:
+@lru_cache(maxsize=None)
+def _header_to_key(schema_json: Path) -> dict[str, str]:
+    return {(f.get("label") or f["key"]): f["key"] for f in _raw(schema_json)}
+
+
+def csv_header_to_key(source: Source = EXISTANT) -> dict[str, str]:
     """CSV headers are the schema's `label`, which is NOT always the `key`.
 
-    16 real columns differ, and two of them collide destructively: the header
-    `adresse_brut` carries the field whose key is `adresse_complete_brut`,
-    while the key `adresse_brut` is published under the header
-    `numero_voie_brut`. Reading a row by key therefore silently loads the wrong
-    values into the wrong columns -- not a missing value, a swapped one.
+    Eight columns differ as of 2026-09-10, and the labels are ADEME's to
+    change without notice. By then the export had renamed the headers of
+    `adresse_brut` and `adresse_complete_brut` to their own keys. The labels
+    vendored before that sent the first onto the second, so `adresse_brut`
+    was stored empty for every certificate loaded. `tests/test_csv_labels.py`
+    checks these labels against the header ADEME serves. See ADR-0023.
 
     The rename must be applied to the whole header row at once, never key by
-    key, or the collision resolves in the wrong direction.
+    key, or a collision resolves in the wrong direction. And it must be the
+    labels of the dataset the row came from: another source's schema swaps
+    columns just as silently.
     """
-    return {(f.get("label") or f["key"]): f["key"] for f in _raw()}
+    return _header_to_key(source.schema_json)
 
 
-def rename_row(row: dict[str, str]) -> dict[str, str]:
-    m = csv_header_to_key()
-    return {m.get(h, h): v for h, v in row.items()}
+def rename_row(row: dict[str, str], source: Source = EXISTANT) -> dict[str, str]:
+    m = csv_header_to_key(source)
+    out = {m.get(h, h): v for h, v in row.items()}
+    # TRAP: two headers landing on one key is a column lost, not an error --
+    # the second silently overwrites the first. Refuse it, so a stale label
+    # stops the load on its first page. See ADR-0023.
+    if len(out) != len(row):
+        keys = [m.get(h, h) for h in row]
+        collided = sorted({k for k in keys if keys.count(k) > 1})
+        raise ValueError(f"CSV headers collide on {collided}: the vendored labels are stale")
+    return out
 
 
 def vocab_domains(cols: dict[str, Column]) -> dict[str, list[str]]:

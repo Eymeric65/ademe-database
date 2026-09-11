@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import httpx
 
 from ademe import spec
-from ademe.config import API, PAGE_SIZE
+from ademe.config import API, API_KEY, EXISTANT, PAGE_SIZE, UNGEOCODED, Source
 
 _NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="?next"?', re.I)
 
@@ -63,14 +63,31 @@ def _get(client: httpx.Client, url: str, params: dict | None = None) -> httpx.Re
     raise ApiError(f"{url}: giving up after {RETRIES} attempts ({last})")
 
 
-def total(client: httpx.Client, *, departement: str | None = None) -> int:
-    params = {"size": 0}
+def _departement_qs(code: str, source: Source = EXISTANT) -> str:
+    field = source.mapping.departement
+    if code == UNGEOCODED:
+        return f"NOT _exists_:{field}"
+    return f'{field}:"{code}"'
+
+
+def total(
+    client: httpx.Client,
+    *,
+    departement: str | None = None,
+    qs: str | None = None,
+    source: Source = EXISTANT,
+) -> int:
+    params: dict = {"size": 0}
     if departement:
-        params["qs"] = f'code_departement_ban:"{departement}"'
-    return _get(client, f"{API}/lines", params).json()["total"]
+        params["qs"] = _departement_qs(departement, source)
+    elif qs:
+        params["qs"] = qs
+    return _get(client, f"{source.api}/lines", params).json()["total"]
 
 
-def values(client: httpx.Client, field: str, size: int = 1000) -> list[str]:
+def values(
+    client: httpx.Client, field: str, size: int = 1000, *, source: Source = EXISTANT
+) -> list[str]:
     """Distinct values for a field, without scanning rows.
 
     Returns [] for free-text fields: the endpoint declines to enumerate
@@ -78,20 +95,23 @@ def values(client: httpx.Client, field: str, size: int = 1000) -> list[str]:
     vocabularies are told apart from the open dictionaries.
     """
     try:
-        r = _get(client, f"{API}/values/{field}", {"size": size})
+        r = _get(client, f"{source.api}/values/{field}", {"size": size})
         got = r.json()
         return got if isinstance(got, list) else []
     except ApiError:
         return []
 
 
-def page(client: httpx.Client, url: str, params: dict | None = None) -> Page:
+def page(
+    client: httpx.Client, url: str, params: dict | None = None, *, source: Source = EXISTANT
+) -> Page:
     r = _get(client, url, params)
     body = r.content
     text = body.decode("utf-8-sig")
     raw = list(csv.DictReader(io.StringIO(text))) if text.strip() else []
-    # Headers are labels; callers want schema keys.
-    rows = [spec.rename_row(r) for r in raw]
+    # Headers are labels; callers want schema keys. The labels of the dataset
+    # `url` points at -- another source's would swap columns without a sound.
+    rows = [spec.rename_row(r, source) for r in raw]
     m = _NEXT.search(r.headers.get("link", ""))
     return Page(rows=rows, next_url=m.group(1) if m else None, nbytes=len(body))
 
@@ -100,20 +120,36 @@ def iter_pages(
     client: httpx.Client,
     *,
     departement: str | None = None,
+    qs: str | None = None,
+    select: list[str] | None = None,
     start_url: str | None = None,
     page_size: int = PAGE_SIZE,
+    source: Source = EXISTANT,
 ) -> Iterator[Page]:
-    """Yield pages of rows. Resume by passing a previously stored `next_url`."""
+    """Yield pages of rows. Resume by passing a previously stored `next_url`.
+
+    `departement=` is sugar for the equivalent `qs`; the weekly delta needs an
+    arbitrary filter (a range over the modification date) rather than one more
+    named argument per query shape.
+
+    `select=` narrows the columns. Reconciliation pulls `numero_dpe` alone --
+    about 15 B a row against ~2 kB for the whole record, which is the
+    difference between eight minutes and a day.
+    """
     if start_url:
         url, params = start_url, None
     else:
-        url = f"{API}/lines"
+        url = f"{source.api}/lines"
         params = {"size": page_size, "format": "csv", "sort": "_i"}
         if departement:
-            params["qs"] = f'code_departement_ban:"{departement}"'
+            params["qs"] = _departement_qs(departement, source)
+        elif qs:
+            params["qs"] = qs
+        if select:
+            params["select"] = ",".join(select)
 
     while True:
-        p = page(client, url, params)
+        p = page(client, url, params, source=source)
         if not p.rows:
             return
         yield p
@@ -123,8 +159,54 @@ def iter_pages(
 
 
 def client() -> httpx.Client:
-    return httpx.Client(
-        timeout=TIMEOUT,
-        follow_redirects=True,
-        headers={"user-agent": "ademe-database/0.1 (local research build)"},
+    headers = {"user-agent": "ademe-database/0.1 (local research build)"}
+    if API_KEY:
+        # `x-apiKey` is what the server's own OpenAPI declares; see ADR-0013,
+        # and `test_api_key.py::test_the_server_still_documents_this_header`.
+        headers["x-apiKey"] = API_KEY
+    return httpx.Client(timeout=TIMEOUT, follow_redirects=True, headers=headers)
+
+
+# Documented on https://data.ademe.fr/pages/faq, in kB/s of dynamic response.
+ANON_KBPS = 500
+AUTH_KBPS = 1000
+
+
+def measure(page_size: int = PAGE_SIZE) -> float:
+    """kB/s on one page, at the size the ingest actually uses."""
+    cl = client()
+    url = f"{API}/lines"
+    params = {"size": page_size, "format": "csv", "sort": "_i"}
+    t0 = time.monotonic()
+    p = page(cl, url, params)
+    return p.nbytes / 1000 / max(time.monotonic() - t0, 1e-9)
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m ademe.api` -- is the key doing anything?
+
+    TRAP: this server does not reject an `x-apiKey` it has never seen. It
+    answers 200 and quietly applies the anonymous limits, so a typo is
+    invisible until the run that was meant to take nine hours takes eighteen.
+    Nothing in the response says which budget you are on. Measuring is the
+    only honest test, and one page is enough because the cap is a sustained
+    rate rather than a burst.
+    """
+    print("ADEME_API_KEY:", "set" if API_KEY else "not set (anonymous)")
+    rate = measure()
+    print(f"measured: {rate:,.0f} kB/s on one page of {PAGE_SIZE:,} rows")
+    midpoint = (ANON_KBPS + AUTH_KBPS) / 2
+    if rate >= midpoint:
+        print(f"-> authenticated limits (~{AUTH_KBPS} kB/s). The key is live.")
+        return 0
+    print(
+        f"-> anonymous limits (~{ANON_KBPS} kB/s).",
+        "The key is not being honoured -- check it was copied whole."
+        if API_KEY
+        else "Set ADEME_API_KEY to double this.",
     )
+    return 0 if not API_KEY else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

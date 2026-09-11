@@ -1,0 +1,189 @@
+name: ETL weekly delta
+
+# The schedule is only safe now that reconciliation exists. The delta cannot see
+# a certificate that LEFT the dataset -- dpe03existant is a virtual view filtered
+# dpe_desactive = 0 -- so scheduling this before ADR-0007 would have automated
+# the drift rather than the update.
+#
+# 04:10 UTC Monday: off-peak in CET, and away from the top of the hour where
+# everybody else's cron lands on ADEME.
+on:
+  schedule:
+    - cron: '10 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      since:
+        description: 'Override the manifest high_water (YYYY-MM-DD)'
+        required: false
+
+# Never cancel a run in flight: it is mid-way through rewriting partitions on
+# R2, and a half-uploaded partition with a swapped manifest is the one state
+# this design exists to avoid.
+concurrency:
+  group: etl-weekly
+  cancel-in-progress: false
+
+jobs:
+  delta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    # The published trees are read from R2 with the job's own key, never over a
+    # public URL: the bucket's public domain is what let the login gate be
+    # walked around (ADR-0012), and this is what lets it go. See ADR-0033.
+    env:
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+    steps:
+      # The job holds each published tree it updates, its merge and possibly a
+      # reconciled copy: well past the runner's free disk. The toolchains below
+      # are preinstalled and never used here.
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      # rclone rather than `wrangler r2 object put`, which caps well below the
+      # largest partitions.
+      - name: Install rclone
+        run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      - name: Download the published tree
+        run: |
+          rclone copy r2:ademe-dpe/v1/search base/v1/search
+          rclone copy r2:ademe-dpe/v1/dpe    base/v1/dpe
+          rclone copy r2:ademe-dpe/v1/index  base/v1/index
+          rclone copyto r2:ademe-dpe/v1/manifest.json base/v1/manifest.json
+
+      - name: Fetch and merge
+        run: |
+          uv run python -m ademe.delta \
+            --base-url base/v1 \
+            --out out \
+            ${{ github.event.inputs.since && format('--since {0}', github.event.inputs.since) || '' }}
+
+      # After the merge, before the upload: a run that cannot reconcile has
+      # published nothing. Additions arrive through the delta above, so anything
+      # still missing here left the dataset. See ADR-0007.
+      - name: Reconcile against ADEME
+        run: |
+          uv run python scripts/reconcile.py --root out/v1 --out reconciled
+          if [ -d reconciled/v1 ]; then rm -rf out && mv reconciled out; fi
+
+      - name: Check for a sharp departure
+        run: uv run python scripts/check_delta.py --out out --base-url base/v1
+
+      # Data first, manifest LAST. A reader that fetches the manifest and then
+      # the files it names must never be pointed at a file that is not there
+      # yet; the reverse order is a window in which the app is broken.
+      - name: Upload partitions
+        run: |
+          rclone copy out/v1/search r2:ademe-dpe/v1/search --checksum
+          rclone copy out/v1/dpe    r2:ademe-dpe/v1/dpe    --checksum
+          rclone copy out/v1/index  r2:ademe-dpe/v1/index  --checksum
+          rclone copyto out/v1/manifest.json r2:ademe-dpe/v1/manifest.json
+
+      # Every other source, after existing housing and one after another: one
+      # ADEME stream at a time (CLAUDE.md §11), so never in parallel. A source whose
+      # tree is not published yet is skipped, since its first build is by hand.
+      # tests/test_workflows.py keeps every registered source here. ADR-0027.
+      - name: New housing, published?
+        id: neuf
+        run: |
+          if [ -n "$(rclone lsf r2:ademe-dpe/v1/neuf/manifest.json 2>/dev/null)" ]; then
+            rclone copy r2:ademe-dpe/v1/neuf base/v1/neuf
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::new housing is not published yet; skipped"
+          fi
+
+      - name: New housing, fetch, merge, reconcile, check
+        id: neuf_delta
+        if: steps.neuf.outputs.published == 'true'
+        run: |
+          uv run python -m ademe.delta --source neuf --base-url base/v1/neuf --out out
+          # Nothing modified this week: no tree was written, and nothing is uploaded.
+          if [ ! -f out/v1/neuf/manifest.json ]; then exit 0; fi
+          uv run python scripts/reconcile.py --source neuf --root out/v1/neuf --out reconciled
+          if [ -d reconciled/v1/neuf ]; then rm -rf out/v1/neuf && mv reconciled/v1/neuf out/v1/neuf; fi
+          uv run python scripts/check_delta.py --source neuf --out out --base-url base/v1/neuf
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: New housing, upload
+        if: steps.neuf_delta.outputs.changed == 'true'
+        run: |
+          rclone copy out/v1/neuf/search r2:ademe-dpe/v1/neuf/search --checksum
+          rclone copy out/v1/neuf/dpe    r2:ademe-dpe/v1/neuf/dpe    --checksum
+          rclone copy out/v1/neuf/index  r2:ademe-dpe/v1/neuf/index  --checksum
+          rclone copyto out/v1/neuf/manifest.json r2:ademe-dpe/v1/neuf/manifest.json
+
+      - name: Tertiary, published?
+        id: tertiaire
+        run: |
+          if [ -n "$(rclone lsf r2:ademe-dpe/v1/tertiaire/manifest.json 2>/dev/null)" ]; then
+            rclone copy r2:ademe-dpe/v1/tertiaire base/v1/tertiaire
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::the tertiary DPE is not published yet; skipped"
+          fi
+
+      - name: Tertiary, fetch, merge, reconcile, check
+        id: tertiaire_delta
+        if: steps.tertiaire.outputs.published == 'true'
+        run: |
+          uv run python -m ademe.delta --source tertiaire --base-url base/v1/tertiaire --out out
+          if [ ! -f out/v1/tertiaire/manifest.json ]; then exit 0; fi
+          uv run python scripts/reconcile.py --source tertiaire --root out/v1/tertiaire --out reconciled
+          if [ -d reconciled/v1/tertiaire ]; then rm -rf out/v1/tertiaire && mv reconciled/v1/tertiaire out/v1/tertiaire; fi
+          uv run python scripts/check_delta.py --source tertiaire --out out --base-url base/v1/tertiaire
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Tertiary, upload
+        if: steps.tertiaire_delta.outputs.changed == 'true'
+        run: |
+          rclone copy out/v1/tertiaire/search r2:ademe-dpe/v1/tertiaire/search --checksum
+          rclone copy out/v1/tertiaire/dpe    r2:ademe-dpe/v1/tertiaire/dpe    --checksum
+          rclone copy out/v1/tertiaire/index  r2:ademe-dpe/v1/tertiaire/index  --checksum
+          rclone copyto out/v1/tertiaire/manifest.json r2:ademe-dpe/v1/tertiaire/manifest.json
+
+      - name: Energy audits, published?
+        id: audit
+        run: |
+          if [ -n "$(rclone lsf r2:ademe-dpe/v1/audit/manifest.json 2>/dev/null)" ]; then
+            rclone copy r2:ademe-dpe/v1/audit base/v1/audit
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::the energy audits are not published yet; skipped"
+          fi
+
+      - name: Energy audits, fetch, merge, reconcile, check
+        id: audit_delta
+        if: steps.audit.outputs.published == 'true'
+        run: |
+          uv run python -m ademe.delta --source audit --base-url base/v1/audit --out out
+          if [ ! -f out/v1/audit/manifest.json ]; then exit 0; fi
+          uv run python scripts/reconcile.py --source audit --root out/v1/audit --out reconciled
+          if [ -d reconciled/v1/audit ]; then rm -rf out/v1/audit && mv reconciled/v1/audit out/v1/audit; fi
+          uv run python scripts/check_delta.py --source audit --out out --base-url base/v1/audit
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Energy audits, upload
+        if: steps.audit_delta.outputs.changed == 'true'
+        run: |
+          rclone copy out/v1/audit/search r2:ademe-dpe/v1/audit/search --checksum
+          rclone copy out/v1/audit/dpe    r2:ademe-dpe/v1/audit/dpe    --checksum
+          rclone copy out/v1/audit/index  r2:ademe-dpe/v1/audit/index  --checksum
+          rclone copyto out/v1/audit/manifest.json r2:ademe-dpe/v1/audit/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delta-manifest
+          path: out/v1/manifest.json
+          retention-days: 30

@@ -23,8 +23,8 @@ from pathlib import Path
 
 import httpx
 
-from ademe import api, db, spec
-from ademe.config import API, DEFAULT_DB
+from ademe import api, db, schema, spec
+from ademe.config import EXISTANT, SOURCES, Source
 
 # The Lambert-93 coordinates carry up to 6 decimals (x*10^6 is ~1e12, well
 # inside int64). Past this a column is stored as TEXT -- scale 0 is the
@@ -51,17 +51,22 @@ def decimals(raw: str) -> int | None:
 
 
 def discover(
-    client: httpx.Client, numeric: list[str], *, sample: int, page_size: int
+    client: httpx.Client,
+    numeric: list[str],
+    *,
+    sample: int,
+    page_size: int,
+    source: Source = EXISTANT,
 ) -> tuple[dict[str, int], dict[str, int], int]:
     """Return (scale per column, non-numeric hits per column, rows seen)."""
     maxdec: dict[str, int] = {c: 0 for c in numeric}
     bad: dict[str, int] = {}
     seen = 0
 
-    url = f"{API}/lines"
+    url = f"{source.api}/lines"
     params = {"size": page_size, "format": "csv", "sort": "_rand"}
     while seen < sample:
-        p = api.page(client, url, params)
+        p = api.page(client, url, params, source=source)
         if not p.rows:
             break
         for row in p.rows:
@@ -89,41 +94,53 @@ def discover(
     return scales, bad, seen
 
 
-def store(path: Path, scales: dict[str, int]) -> None:
+def store(path: Path, scales: dict[str, int], source: Source = EXISTANT) -> None:
+    """Record the scales, and rebuild the still-empty tables under them.
+
+    TRAP: `ademe.schema` declares every numeric column INTEGER, before any scale
+    is known. A column too precise to scale must be TEXT, or SQLite's affinity
+    turns its "78.50" into 78.5. And scales encode the load: once a row is
+    stored they cannot change. See ADR-0032.
+    """
     conn = db.connect(path)
     try:
-        with db.transaction(conn):
-            conn.executemany(
-                "UPDATE column_meta SET scale = ?, encoding = ?"
-                " WHERE column_name = ?",
-                [
-                    (
-                        s,
-                        "text" if s == TEXT_SENTINEL else ("scaled" if s > 1 else "int"),
-                        c,
-                    )
-                    for c, s in scales.items()
-                ],
+        if conn.execute("SELECT 1 FROM dpe LIMIT 1").fetchone():
+            raise SystemExit(
+                f"{path} already holds rows: its scales encode them and cannot"
+                " change under them. Build a fresh database."
             )
+        with db.transaction(conn):
+            # Children first. The vocabularies are kept: `vocab` may already have run.
+            for table in [
+                *dict.fromkeys(r.table for r in source.mapping.repeats),
+                "dpe_adresse_brut",
+                "dpe",
+                "adresse",
+                "commune",
+            ]:
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
     finally:
         conn.close()
+    schema.build(path, scales=scales, source=source)
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--db-path", type=Path, default=DEFAULT_DB)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument("--db-path", type=Path, help="default: the source's own database")
     ap.add_argument("--sample", type=int, default=20_000)
     ap.add_argument("--page-size", type=int, default=2_000)
     args = ap.parse_args(argv)
+    source = SOURCES[args.source]
 
-    cols = spec.load()
+    cols = spec.load(source=source)
     numeric = spec.numeric_columns(cols)
     client = api.client()
     print(f"sampling {args.sample:,} random rows for {len(numeric)} numeric columns...")
     scales, bad, seen = discover(
-        client, numeric, sample=args.sample, page_size=args.page_size
+        client, numeric, sample=args.sample, page_size=args.page_size, source=source
     )
-    store(args.db_path, scales)
+    store(args.db_path or source.db_path, scales, source)
 
     hist: dict[int, int] = {}
     for s in scales.values():

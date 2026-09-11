@@ -13,7 +13,8 @@ the guard that makes "lossless" checkable rather than aspirational.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,218 @@ class Coverage:
         )
 
 
-def classify(source_columns: list[str]) -> Coverage:
+def _repeat_without(rep: Repeat, absent: set[str]) -> Repeat | None:
+    slots = rep.slots()
+    gone = [s for s in slots if set(s["src_to_dst"]) <= absent]
+    kept = [s for s in slots if s not in gone]
+    if not kept:
+        return None
+    outer = tuple(sorted({s["outer"] for s in kept}))
+    inner = tuple(sorted({s["inner"] for s in kept})) if rep.inner else None
+    if len(kept) != len(outer) * len(inner or (None,)):
+        raise ValueError(
+            f"{rep.table}: dropping slot(s) {[(s['outer'], s['inner']) for s in gone]}"
+            " leaves no outer x inner grid"
+        )
+    columns = {}
+    for template, dst in rep.columns.items():
+        names = [template.format(i=s["outer"], g=s["inner"]) for s in kept]
+        missing = [n for n in names if n in absent]
+        if not missing:
+            columns[template] = dst
+        elif len(missing) != len(names):
+            raise ValueError(f"{rep.table}: {missing[0]} is absent from some slots but not others")
+    return replace(rep, columns=columns, outer=outer, inner=inner)
+
+
+@dataclass(frozen=True, eq=False)
+class Mapping:
+    """Where one dataset's columns go: its repeating groups, and the columns
+    deduplicated into `commune`, `adresse` and `dpe_adresse_brut`. Everything
+    else lands on `dpe`. See ADR-0017."""
+
+    repeats: tuple[Repeat, ...]
+    commune: dict[str, str]
+    adresse: dict[str, str]
+    adresse_brut: dict[str, str]
+    internal: frozenset[str] = frozenset(INTERNAL_COLUMNS)
+    # The row key, the partition field and the incremental key. The DPE
+    # datasets share these names; the audits do not. See ADR-0029.
+    key: str = "numero_dpe"
+    departement: str = "code_departement_ban"
+    modified: str = "date_derniere_modification_dpe"
+
+    def without(self, absent: Iterable[str]) -> Mapping:
+        """This structure, for a dataset that lacks the columns in `absent`.
+
+        Strict, because a child table is built from its first slot
+        (`ddl.repeat_ddl`): a column may go only if every slot lacks it, and a
+        slot only if all its columns are gone and the slots left still form an
+        outer x inner grid. Anything else raises rather than building a table
+        that cannot hold the data. Names this structure does not claim are
+        top-level `dpe` columns, which need no declaring.
+        """
+        absent = set(absent)
+        return replace(
+            self,
+            repeats=tuple(r for r in (_repeat_without(r, absent) for r in self.repeats) if r),
+            commune={s: d for s, d in self.commune.items() if s not in absent},
+            adresse={s: d for s, d in self.adresse.items() if s not in absent},
+            adresse_brut={s: d for s, d in self.adresse_brut.items() if s not in absent},
+        )
+
+
+EXISTANT = Mapping(
+    repeats=REPEATS,
+    commune=COMMUNE_COLUMNS,
+    adresse=ADRESSE_COLUMNS,
+    adresse_brut=ADRESSE_BRUT_COLUMNS,
+)
+
+# New housing lacks 20 of existing housing's columns: eight top-level, twelve
+# whole columns of repeating groups. Listed rather than derived from the two
+# schemas, so a column ADEME drops later still fails `classify` instead of
+# quietly shrinking this. See ADR-0025.
+NEUF_ABSENT = frozenset(
+    {
+        "apport_interne_saison_chauffe",
+        "apport_interne_saison_froide",
+        "apport_solaire_saison_chauffe",
+        "apport_solaire_saison_froide",
+        "date_installation_generateur_n1_ecs_n1",
+        "date_installation_generateur_n2_ecs_n1",
+        "description_generateur_chauffage_n1_installation_n1",
+        "description_generateur_chauffage_n1_installation_n2",
+        "description_generateur_chauffage_n2_installation_n1",
+        "description_generateur_chauffage_n2_installation_n2",
+        "facteur_couverture_solaire_installation_chauffage_n1",
+        "facteur_couverture_solaire_installation_chauffage_n2",
+        "facteur_couverture_solaire_n1",
+        "facteur_couverture_solaire_saisi_installation_chauffage_n1",
+        "facteur_couverture_solaire_saisi_installation_chauffage_n2",
+        "facteur_couverture_solaire_saisi_n1",
+        "periode_installation_generateur_froid",
+        "qualite_isolation_plancher_haut_comble_perdu",
+        "qualite_isolation_plancher_haut_toit_terrasse",
+        "type_energie_climatisation",
+    }
+)
+NEUF = EXISTANT.without(NEUF_ABSENT)
+
+# The tertiary DPE's one repeating group: up to three energies, each with its
+# use, consumption, cost and the year it was read. Its address and commune
+# columns are existing housing's. See ADR-0026.
+ENERGIE_TERTIAIRE = Repeat(
+    table="dpe_energie",
+    outer=(1, 2, 3),
+    columns={
+        "type_energie_n{i}": "type_energie",
+        "type_usage_energie_n{i}": "type_usage",
+        "conso_ef_energie_n{i}": "conso_ef",
+        "conso_ep_energie_n{i}": "conso_ep",
+        "frais_annuel_energie_n{i}": "frais_annuel",
+        "annee_releve_conso_energie_n{i}": "annee_releve",
+    },
+)
+TERTIAIRE = Mapping(
+    repeats=(ENERGIE_TERTIAIRE,),
+    commune=COMMUNE_COLUMNS,
+    adresse=ADRESSE_COLUMNS,
+    adresse_brut=ADRESSE_BRUT_COLUMNS,
+)
+
+# The energy audits: one row per audit STEP, keyed on `id_etape` (unique over
+# all 3.2M rows; `n_audit` repeats across an audit's steps). Their BAN columns
+# are renamed and their four repeating groups are their own; each source has
+# its own database, so the child tables keep existing housing's names. See
+# ADR-0031.
+INSTALLATION_CHAUFFAGE_AUDIT = Repeat(
+    table="dpe_installation_chauffage",
+    outer=(1, 2),
+    columns={
+        "type_installation_chauffage_n{i}": "type_installation",
+        "type_emetteur_installation_chauffage_n{i}": "type_emetteur",
+        "configuration_installation_chauffage_n{i}": "configuration",
+        "etat_installation_chauffage_n{i}": "etat",
+        "conso_ef_installation_chauffage_n{i}": "conso_ef",
+        "surface_chauffee_installation_chauffage_n{i}": "surface_chauffee",
+        "facteur_couverture_solaire_installation_chauffage_n{i}": "facteur_couverture_solaire",
+        "facteur_couverture_solaire_installation_chauffage_saisi_n{i}": "facteur_couverture_solaire_saisi",
+    },
+)
+GENERATEUR_CHAUFFAGE_AUDIT = Repeat(
+    table="dpe_generateur_chauffage",
+    outer=(1, 2),
+    inner=(1, 2),
+    columns={
+        "type_generateur_n{g}_installation_chauffage_n{i}": "type_generateur",
+        "type_energie_generateur_n{g}_installation_chauffage_n{i}": "type_energie",
+        "usage_generateur_n{g}_installation_chauffage_n{i}": "usage",
+        "conso_ef_generateur_n{g}_installation_chauffage_n{i}": "conso_ef",
+    },
+)
+BILAN_ENERGIE_AUDIT = Repeat(
+    table="dpe_bilan_energie",
+    outer=(1, 2, 3),
+    columns={
+        "type_energie_n{i}": "type_energie",
+        "conso_ef_5_usages_energie_n{i}": "conso_5_usages_ef",
+        "conso_ef_chauffage_energie_n{i}": "conso_chauffage_ef",
+        "conso_ef_ecs_energie_n{i}": "conso_ecs_ef",
+        "cout_5_usages_energie_n{i}": "cout_5_usages",
+        "cout_chauffage_energie_n{i}": "cout_chauffage",
+        "cout_ecs_energie_n{i}": "cout_ecs",
+        "emission_ges_5_usages_energie_n{i}": "emission_ges_5_usages",
+        "emission_ges_chauffage_energie_n{i}": "emission_ges_chauffage",
+        "emission_ges_ecs_energie_n{i}": "emission_ges_ecs",
+    },
+)
+GENERATEUR_ECS_AUDIT = Repeat(
+    table="dpe_generateur_ecs",
+    outer=(1,),
+    columns={
+        "type_generateur_ecs_n{i}": "type_generateur",
+        "type_energie_generateur_ecs_n{i}": "type_energie",
+        "usage_generateur_ecs_n{i}": "usage",
+        "volume_stockage_generateur_ecs_n{i}": "volume_stockage",
+        "cop_generateur_ecs_n{i}": "cop",
+        "conso_ef_generateur_ecs_n{i}": "conso_ef",
+        "date_installation_generateur_ecs_n{i}": "date_installation",
+    },
+)
+AUDIT = Mapping(
+    repeats=(
+        INSTALLATION_CHAUFFAGE_AUDIT,
+        GENERATEUR_CHAUFFAGE_AUDIT,
+        BILAN_ENERGIE_AUDIT,
+        GENERATEUR_ECS_AUDIT,
+    ),
+    commune={
+        "code_insee_ban": "code_insee",
+        "nom_commune_ban": "nom",
+        "n_departement_ban": "code_departement",
+        "n_region_ban": "code_region",
+    },
+    adresse={
+        "identifiant_ban": "identifiant_ban",
+        "adresse_ban": "adresse",
+        "n_voie_ban": "numero_voie",
+        "nom_voie_ban": "nom_rue",
+        "code_postal_ban": "code_postal",
+    },
+    adresse_brut={
+        "adresse_brut": "adresse_brut",
+        "n_et_nom_voie_brut": "n_et_nom_voie_brut",
+        "code_postal_brut": "code_postal_brut",
+        "nom_commune_brut": "nom_commune_brut",
+    },
+    key="id_etape",
+    departement="n_departement_ban",
+    modified="date_derniere_modification",
+)
+
+
+def classify(source_columns: list[str], mapping: Mapping = EXISTANT) -> Coverage:
     """Assign every source column to exactly one destination."""
     cov = Coverage()
     claimed: dict[str, str] = {}
@@ -213,24 +425,24 @@ def classify(source_columns: list[str]) -> Coverage:
             raise ValueError(f"{col!r} claimed by both {claimed[col]} and {where}")
         claimed[col] = where
 
-    for rep in REPEATS:
+    for rep in mapping.repeats:
         cols = sorted(rep.source_columns())
         cov.repeats[rep.table] = cols
         for c in cols:
             claim(c, rep.table)
 
-    for src in COMMUNE_COLUMNS:
+    for src in mapping.commune:
         cov.commune.append(src)
         claim(src, "commune")
-    for src in ADRESSE_COLUMNS:
+    for src in mapping.adresse:
         cov.adresse.append(src)
         claim(src, "adresse")
-    for src in ADRESSE_BRUT_COLUMNS:
+    for src in mapping.adresse_brut:
         cov.adresse_brut.append(src)
         claim(src, "dpe_adresse_brut")
 
     for col in source_columns:
-        if col in INTERNAL_COLUMNS:
+        if col in mapping.internal:
             cov.internal.append(col)
             claim(col, "internal")
         elif col not in claimed:
@@ -246,8 +458,8 @@ def classify(source_columns: list[str]) -> Coverage:
     return cov
 
 
-def check_coverage(source_columns: list[str]) -> Coverage:
-    cov = classify(source_columns)
+def check_coverage(source_columns: list[str], mapping: Mapping = EXISTANT) -> Coverage:
+    cov = classify(source_columns, mapping)
     if cov.total() != len(source_columns):
         raise ValueError(f"covered {cov.total()} of {len(source_columns)} columns")
     return cov

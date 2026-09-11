@@ -1,13 +1,16 @@
 # DPE platform on Cloudflare — Parquet data plane, D1 app plane
 
-> **Status: proposed, awaiting review.** Every number in "Measured facts" was verified
-> live against `data.ademe.fr` or by local experiment during design — none are estimates
-> unless labelled as such. The decisions this plan depends on are recorded separately as
+> **Status: reviewed 2026-09-04.** Corrections from the review are in the section "Review
+> 2026-09-04" at the end; the PR sequence that executes this plan is `docs/roadmap.md`. Every
+> number in "Measured facts" was verified live against `data.ademe.fr` or by local experiment
+> during design — none are estimates unless labelled as such. The decisions this plan depends on are recorded separately as
 > ADR-0001 to ADR-0005 in `docs/decisions/`.
 
 ## Context
 
 Personal project: an authenticated web app over the ADEME DPE open data, where users compose their own analysis rather than browse a fixed list. Everything on Cloudflare.
+
+**Primary product goal (stated 2026-09-04):** reverse-locate a property from the DPE facts a listing publishes — postcode or city, DPE and GES class, month and year of the DPE, surface, sometimes kWh/m²/an and kgCO₂/m²/an, building type, construction period — and return the few matching certificates with their exact address and coordinates, which the user can then save. National aggregates are secondary. The dominant query is therefore a multi-predicate filter returning a handful of rows from one département, followed by a detail read of one certificate; the data-plane layout in ADR-0006 is shaped for that.
 
 The previous plan in this file (a local lossless SQLite build) is **superseded as a product design but kept as tooling** — its Python ETL is what builds the Parquet, and its round-trip test is what proves the build is correct. What changed is the conclusion: measurement showed that importing 15.5M rows into a *serving* database was solving a problem that does not exist. The product is analytical, so the data belongs in columnar files the client queries directly.
 
@@ -30,10 +33,11 @@ All verified live during design, not estimated:
 | Raw CSV | 2,012 B/row → 31 GB |
 | **Columnar + compression** | **~289 B/row → 4.48 GB** (conservative: measured on 4k rows, so dictionaries are not yet amortised) |
 | **R2 cost** | **$0.067/month**, egress free |
-| ADEME limit (anonymous) | 600 req/min, **500 kB/s**, 20s processing per 60s |
-| ADEME limit (API key) | 1200 req/min, 1 MB/s, 60s processing per 60s |
-| Full fetch, 226 columns | **17.4 h** — GitHub Actions caps a job at 6 h |
-| Fetch, 14 columns | 1.0 h — the server cost is per-column, not per-byte |
+| ADEME limit (anonymous) | 600 req/min, **500 kB/s** (FAQ, verified); the "20s processing per 60s" budget is an estimate, not published |
+| ADEME limit (API key) | 1200 req/min, 1 MB/s (FAQ, verified); "60s processing per 60s" is an estimate |
+| Full fetch, 226 columns | **17.4 h** — exactly the 500 kB/s cap (2,012 B × 247 rows/s); GitHub Actions caps a job at 6 h |
+| Fetch, 14 columns | 1.0 h — the cost is per byte transferred, so narrow selects are cheap |
+| Local fixture | département 09 fully ingested: **31,157 rows** in the local SQLite (2026-09-03) |
 | Départements | 104, from **838,532** (Paris) to **2** (Saint-Pierre-et-Miquelon) |
 | Query latency, live API | filter 0.07–0.21s · facets 0.11s · `geo_distance` 0.17s |
 | CORS on data.ademe.fr | `access-control-allow-origin: *` |
@@ -96,7 +100,7 @@ Migrations follow the same house pattern: Drizzle generates, a hand-rolled runne
 
 Since the braces are gone, the belt has to be structural. Four controls, all lifted from the existing repos:
 
-1. **One choke point.** `server/db.ts` exports `withCaller(sub, fn)` and nothing else — no raw `db` handle escapes the module. Every exported function takes the session subject and builds its own owner predicate. Modelled on `local-database-agregator/viewer/server/db.ts`, including its fail-closed detail: a missing subject becomes `''`, never `NULL`, so predicates are FALSE and an unauthenticated request reads **zero rows rather than everything**.
+1. **One choke point.** `server/db.ts` exports scoped functions and nothing else — no raw `db` handle escapes the module. Every exported function takes a `Caller` built by `callerFrom(sub)` and builds its own owner predicate. Modelled on `local-database-agregator/viewer/server/db.ts`, including its fail-closed detail: a missing subject becomes `''`, never `NULL`, so predicates are FALSE and an unauthenticated request reads **zero rows rather than everything**.
 2. **A lint test that greps for escapes.** Fails if `drizzle(` or a bare `env.DB` appears anywhere outside `server/db.ts`. This is what substitutes for the owner-exemption that policies gave for free.
 3. **Default-deny gate stated as an exception list**, copied from `viewer/server/auth.ts`: routes are authenticated unless explicitly named public, applied **once** in the router. A route added later is gated by default rather than by whoever adds it remembering.
 4. **An allowlist test that greps the route declaration**, after `modescore/test/unit/authorization.test.ts`: an operation is owner-scoped unless named in a `SELF_SCOPED` map, so widening one is an edit somebody has to justify in review.
@@ -157,3 +161,41 @@ Their rule, kept: **a feature's test is red before the feature exists and green 
 - Cross-tenant probe green with two real Google accounts.
 - Playwright: sign in, save a building, run an analysis, sign out — locally and against the preview URL.
 - A measured cost line in ADR-0002: actual R2 storage, ops and Workers spend after the first month against the $0.067 + $5 estimate.
+
+## Review 2026-09-04
+
+Fact-check of every external claim above, live against `data.ademe.fr` and the Cloudflare and
+GitHub documentation. Everything not listed here was confirmed as written.
+
+**Corrections, each carried by a PR in `docs/roadmap.md`:**
+
+1. **The weekly delta cannot see deletions.** `dpe03existant` is a Data Fair *virtual* dataset
+   (id `meg-83tjwtg8dyz4vv7h1dqe`) over a private child, filtered `dpe_desactive = 0`; the field is
+   absent from the public schema. A deactivated certificate simply leaves the view, and
+   `date_derniere_modification_dpe > mark` never returns it. The upsert-only merge in "Build" would
+   keep it forever, and the verification line "manifest row counts equal ADEME's total" fails after
+   the first deactivation. Fix: a per-département reconciliation step (count check, one-column id
+   pull on mismatch) — ADR-0007, PR 9.
+2. **`r2.dev` public URLs are rate-limited and documented as dev-only.** The bucket must sit behind
+   a custom domain (available) with CORS set through `wrangler r2 bucket cors set`. PR 8.
+3. **The cross-tenant probe cannot sign in with two real Google accounts in CI.** Better Auth's
+   email+password provider is enabled only when `AUTH_TEST_CREDENTIALS=1` is set in dev and
+   preview; production never sets it. The probe signs two users up through the real HTTP auth
+   routes — ADR-0008, PRs 3 and 4.
+4. **ADR-0002's consequence "point lookups are rare" is false for the primary goal.** Parquet
+   still wins (a filtered search touching a few row groups of a narrow file is cheap), but the
+   layout changes: a narrow per-département search index sorted by
+   `(code_postal_ban, etiquette_dpe, surface_habitable_logement)` next to the wide 226-column
+   detail file sorted by `numero_dpe`. National rollups are deferred — ADR-0006, PR 7.
+
+**Smaller corrections:** the "20s / 60s processing" budgets are not in ADEME's FAQ (labelled as
+estimates above); R2's free tier covers 10 GB-month, so the real storage cost is $0 rather than
+$0.067; `wrangler versions upload --preview-alias` gives a deterministic preview URL, so nothing
+needs to parse stdout; the higher 2 MB/s static-file lane in the FAQ is unavailable because the
+underlying dataset has no public data files; the schema's `x-originalName` differs from `key` for
+13 fields (9 real, 4 Data Fair internals) rather than 16, and the `adresse_brut` collision is
+confirmed; the Python export needs a Parquet writer — `duckdb` — which is a runtime dependency
+recorded in ADR-0006; `server/db.ts` shipped with per-function `Caller` arguments rather than a
+`withCaller` wrapper, and that is the shape kept.
+
+**Order of work** is superseded by the dependency graph in `docs/roadmap.md`.

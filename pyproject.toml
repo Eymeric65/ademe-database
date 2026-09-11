@@ -7,7 +7,10 @@ requires-python = ">=3.13"
 # The point of this repo is a measurement, and every dependency is a variable
 # in that measurement. httpx is here only because retry/timeout handling
 # against a 17-hour download is worth not hand-rolling.
-dependencies = ["httpx>=0.28"]
+# duckdb writes the Parquet, reads it back in the tests, and merges the weekly
+# delta -- one engine at both ends, so the type mapping cannot disagree with
+# itself. See ADR-0006.
+dependencies = ["httpx>=0.28", "duckdb>=1.1"]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-xdist>=3"]

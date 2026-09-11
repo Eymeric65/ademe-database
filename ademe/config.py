@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from ademe import mapping as _mapping
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -12,15 +15,113 @@ DEFAULT_DB = Path(
     os.environ.get("ADEME_DB", "/run/media/eymericchauchat/990 Pro/database/ademe.sqlite")
 )
 
-SCHEMA_JSON = REPO / "schema" / "ademe-schema.json"
+@dataclass(frozen=True)
+class Source:
+    """One ADEME dataset: where it is published, the schema that describes it,
+    the SQLite file it is built in and the Parquet tree it is published to.
+    See ADR-0017."""
 
-DATASET = "dpe03existant"
-API = f"https://data.ademe.fr/data-fair/api/v1/datasets/{DATASET}"
+    slug: str
+    dataset: str  # Data Fair id
+    schema_json: Path  # its labels drive the CSV header rename -- never another's
+    db_path: Path  # one file per source; two sources in one file corrupt both
+    subdir: str  # tree under v1/; "" is v1/ itself
+    # Where its columns go. Not compared: a source is its name, and a
+    # Mapping holds dicts, which cannot be hashed.
+    mapping: _mapping.Mapping = field(compare=False)
+
+    @property
+    def api(self) -> str:
+        return f"https://data.ademe.fr/data-fair/api/v1/datasets/{self.dataset}"
+
+
+EXISTANT = Source(
+    slug="existant",
+    dataset="dpe03existant",
+    schema_json=REPO / "schema" / "ademe-schema.json",
+    db_path=DEFAULT_DB,
+    subdir="",
+    mapping=_mapping.EXISTANT,
+)
+NEUF = Source(
+    slug="neuf",
+    dataset="dpe02neuf",
+    schema_json=REPO / "schema" / "dpe02neuf-schema.json",
+    db_path=DEFAULT_DB.with_name("ademe-neuf.sqlite"),
+    subdir="neuf",
+    mapping=_mapping.NEUF,
+)
+TERTIAIRE = Source(
+    slug="tertiaire",
+    dataset="dpe01tertiaire",
+    schema_json=REPO / "schema" / "dpe01tertiaire-schema.json",
+    db_path=DEFAULT_DB.with_name("ademe-tertiaire.sqlite"),
+    subdir="tertiaire",
+    mapping=_mapping.TERTIAIRE,
+)
+# The energy audits, one row per audit step. ADR-0031.
+AUDIT = Source(
+    slug="audit",
+    dataset="ync2epx48x9azbdnggbygqp0",
+    schema_json=REPO / "schema" / "audit-schema.json",
+    db_path=DEFAULT_DB.with_name("ademe-audit.sqlite"),
+    subdir="audit",
+    mapping=_mapping.AUDIT,
+)
+SOURCES = {s.slug: s for s in (EXISTANT, NEUF, TERTIAIRE, AUDIT)}
+
+# Existing housing, under the names every module used before there was a second.
+SCHEMA_JSON = EXISTANT.schema_json
+DATASET = EXISTANT.dataset
+API = EXISTANT.api
 LICENCE = "Licence Ouverte 2.0 (Etalab)"
+
+
+
+def _dotenv(path: Path) -> None:
+    """Read `KEY=value` lines from `.env` into the environment, if it exists.
+
+    The repo root, because a key passed on the command line lands in shell
+    history and a key exported from `~/.bashrc` lands in every process on the
+    machine. `.env` is git-ignored.
+
+    TRAP: `uv run` does NOT read `.env` -- it needs `--env-file .env` or
+    `UV_ENV_FILE`, and forgetting either is silent. The ingest simply runs at
+    the anonymous rate and finishes in twice the time. Reading the file here
+    is what makes every entry point behave the same way.
+
+    A real environment variable always wins, so `ADEME_API_KEY=... uv run ...`
+    still overrides the file for a one-off.
+    """
+    try:
+        text = path.read_text()
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+_dotenv(REPO / ".env")
+
+# Optional. ADEME rate-limits per caller: an anonymous one gets 500 kB/s of
+# dynamic responses, an authenticated one 1 MB/s. Absent is the supported
+# state -- the weekly delta is minutes either way, and only the once-ever base
+# build is long enough for the difference to matter. See ADR-0013.
+API_KEY = os.environ.get("ADEME_API_KEY") or None
 
 # Measured: 40 s per 10 000 rows. Larger pages do not go faster (the server is
 # the limit) and cost more to re-fetch on a retry.
 PAGE_SIZE = 10_000
+
+# ADEME could not geocode some certificates, which then carry no
+# `code_departement_ban`, so no departement query returns them. They are one
+# pseudo-departement from the ADEME query to the published partition.
+# See ADR-0024.
+UNGEOCODED = "NG"
 
 # Set before the first CREATE TABLE or it is silently ignored. 16384 cuts leaf
 # page slack from ~7% to ~2.3% at this row width.

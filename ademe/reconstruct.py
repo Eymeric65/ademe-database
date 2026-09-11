@@ -15,7 +15,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from ademe.ingest import EPOCH
-from ademe.mapping import REPEATS
+from ademe.config import EXISTANT, Source
 
 
 def _fmt_scaled(value: int, scale: int) -> str:
@@ -26,8 +26,10 @@ def _fmt_scaled(value: int, scale: int) -> str:
 
 
 class Reconstructor:
-    def __init__(self, conn):
+    def __init__(self, conn, source: Source = EXISTANT):
         self.conn = conn
+        self.key = source.mapping.key
+        self.repeats = source.mapping.repeats
         self.meta = {
             r["column_name"]: dict(r)
             for r in conn.execute("SELECT * FROM column_meta").fetchall()
@@ -65,9 +67,10 @@ class Reconstructor:
             return str(int(raw))
         return str(raw)
 
-    def row(self, numero_dpe: str) -> dict[str, str] | None:
+    def row(self, key: str) -> dict[str, str] | None:
+        """One record, by the source's own key (ADR-0029)."""
         cur = self.conn.execute(
-            "SELECT * FROM dpe WHERE numero_dpe = ?", (numero_dpe,)
+            f"SELECT * FROM dpe WHERE {self.key} = ?", (key,)
         ).fetchone()
         if cur is None:
             return None
@@ -92,10 +95,10 @@ class Reconstructor:
             # Queried separately, not joined: `code_insee` exists on both tables
             # and a `SELECT a.*, c.*` collapses the duplicate names, which
             # silently blanked every commune column.
-            if adresse.get("code_insee"):
+            if adresse.get("commune_id") is not None:
                 got = self.conn.execute(
-                    "SELECT * FROM commune WHERE code_insee = ?",
-                    (adresse["code_insee"],),
+                    "SELECT * FROM commune WHERE commune_id = ?",
+                    (adresse["commune_id"],),
                 ).fetchone()
                 commune = dict(got) if got else {}
         got = self.conn.execute(
@@ -104,7 +107,7 @@ class Reconstructor:
         brut = dict(got) if got else {}
 
         children: dict[str, dict[tuple, dict]] = {}
-        for rep in REPEATS:
+        for rep in self.repeats:
             rows = self.conn.execute(
                 f"SELECT * FROM {rep.table} WHERE dpe_id = ?", (dpe_id,)
             ).fetchall()
@@ -129,7 +132,7 @@ class Reconstructor:
             else:
                 out[col] = ""  # filled below, where the slot is known
 
-        for rep in REPEATS:
+        for rep in self.repeats:
             for slot in rep.slots():
                 k = (slot["outer"], slot["inner"])
                 got = children[rep.table].get(k, {})
