@@ -52,6 +52,13 @@ describe('formatValue', () => {
     expect(fmt('apport_interne_saison_chauffe', 2732.5, undefined, { surface_habitable_logement: 113.9 })).toBe(
       '2,73 MWh/an',
     )
+    // ADEME leaves the living area empty on some records (the e2e fixture's
+    // 2109E0005780R): the surface it divided by is still in conso ÷ conso/m².
+    const noSurface = { surface_habitable_logement: null, conso_5_usages_ef: 21081.7, conso_5_usages_par_m2_ef: 275.6 }
+    expect(fmt('apport_interne_saison_chauffe', 1977232.4, undefined, noSurface)).toBe('1,98 MWh/an')
+    expect(fmt('apport_interne_saison_chauffe', '1977232.4', undefined, { conso_5_usages: '21081.7', conso_5_usages_m2: '275.6' })).toBe(
+      '1,98 MWh/an',
+    )
     // Only the apports: a besoin is kWh on every record.
     expect(fmt('besoin_chauffage', 17100, undefined, house)).toBe('17,1 MWh/an')
   })

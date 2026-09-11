@@ -651,9 +651,27 @@ const SOMETIMES_WH = new Set([
   'apport_solaire_saison_froide',
 ])
 
+/**
+ * The living area, or, where ADEME left that column empty, the area it divided
+ * by: every such record still has a total and its per-m² twin.
+ */
+function livingArea(row: Row): number | null {
+  const surface = toNumber(row.surface_habitable_logement)
+  if (surface) return surface
+  for (const [total, perM2] of [
+    ['conso_5_usages_ef', 'conso_5_usages_par_m2_ef'],
+    ['conso_5_usages', 'conso_5_usages_m2'],
+  ] as const) {
+    const t = toNumber(row[total])
+    const p = toNumber(row[perM2])
+    if (t && p) return t / p
+  }
+  return null
+}
+
 function fromWh(key: string, n: number, row?: Row): number {
   if (!row || !SOMETIMES_WH.has(key)) return n
-  const surface = toNumber(row.surface_habitable_logement)
+  const surface = livingArea(row)
   return surface && n / surface > 10_000 ? n / 1000 : n
 }
 
