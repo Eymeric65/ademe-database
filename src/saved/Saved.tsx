@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
+import { isSource, SOURCE } from '../data/sources'
+import { detailHref } from '../routes'
 
-type SavedBuilding = { id: string; numeroDpe: string; note: string | null; createdAt: number }
+type SavedBuilding = {
+  id: string
+  numeroDpe: string
+  source: string
+  dept: string | null
+  note: string | null
+  createdAt: number
+}
 
 export function Saved({ signedIn }: { signedIn: boolean }) {
   const [rows, setRows] = useState<SavedBuilding[] | undefined>(undefined)
@@ -36,25 +45,32 @@ export function Saved({ signedIn }: { signedIn: boolean }) {
         <p className="lede">Aucun certificat enregistré. Lancez une recherche pour commencer.</p>
       ) : (
         <ul className="hits">
-          {rows.map((row) => (
-            <li key={row.id} className="hit">
-              <div className="hit-body">
-                <p className="hit-address">
-                  <a href={`#/dpe/${row.numeroDpe}`}>{row.numeroDpe}</a>
-                </p>
-                {row.note ? <p className="hit-meta">{row.note}</p> : null}
-              </div>
-              <button
-                type="button"
-                className="link"
-                onClick={() => {
-                  void api.del(`/api/buildings/${row.id}`).then(refresh)
-                }}
-              >
-                Retirer
-              </button>
-            </li>
-          ))}
+          {rows.map((row) => {
+            const source = isSource(row.source) ? row.source : 'existant'
+            return (
+              <li key={row.id} className="hit">
+                <div className="hit-body">
+                  <p className="hit-address">
+                    <a href={detailHref({ source, key: row.numeroDpe, dept: row.dept })}>
+                      {row.numeroDpe}
+                    </a>
+                  </p>
+                  <p className="hit-meta">
+                    {[SOURCE[source].label, row.note].filter(Boolean).join(' · ')}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => {
+                    void api.del(`/api/buildings/${row.id}`).then(refresh)
+                  }}
+                >
+                  Retirer
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
     </section>

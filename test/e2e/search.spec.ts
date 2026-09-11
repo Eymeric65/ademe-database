@@ -88,3 +88,93 @@ test('a result links to the map at real coordinates', async ({ page }) => {
   expect(lon).toBeGreaterThan(1)
   expect(lon).toBeLessThan(2.5)
 })
+
+test('the exact day of the diagnostic finds it', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-day'))
+  await page.goto('/')
+
+  await page.getByLabel('Code postal').fill(TARGET.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(TARGET.classe)
+  // Issued 2021-08-03. A month would have matched the whole of August.
+  await page.getByLabel('Du', { exact: true }).fill('2021-08-03')
+  await page.getByLabel('Au', { exact: true }).fill('2021-08-03')
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+
+  await expect(page.getByText(TARGET.address)).toBeVisible({ timeout: 60_000 })
+})
+
+test('the day after excludes it', async ({ page }) => {
+  // The non-vacuity proof for the day range: same search, one day later.
+  await signUpViaApi(page, uniqueEmail('search-day-excl'))
+  await page.goto('/')
+
+  await page.getByLabel('Code postal').fill(TARGET.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(TARGET.classe)
+  await page.getByLabel('Du', { exact: true }).fill('2021-08-04')
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+
+  await expect(
+    page.locator('.count').or(page.getByText('Aucun certificat')),
+  ).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText(TARGET.address)).toHaveCount(0)
+})
+
+test('a surface written the French way still searches', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-comma'))
+  await page.goto('/')
+
+  await page.getByLabel('Code postal').fill(TARGET.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(TARGET.classe)
+  await page.getByLabel('Surface (m²)').fill('176,4')
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+
+  await expect(page.getByText(TARGET.address)).toBeVisible({ timeout: 60_000 })
+})
+
+test('a commune needs a département, and then finds it', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-commune'))
+  await page.goto('/')
+
+  await page.getByLabel('Commune').fill(TARGET.commune)
+  await page.getByLabel('Classe énergie').selectOption(TARGET.classe)
+  // Alone, a commune would read every partition in the country.
+  await expect(page.getByRole('button', { name: 'Rechercher' })).toBeDisabled()
+
+  await page.getByLabel('Département').selectOption('09')
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+  await expect(page.getByText(TARGET.address)).toBeVisible({ timeout: 60_000 })
+})
+
+// One real record per other source, all in Ariège: printed by
+// `scripts/build-e2e-fixture.py --from-published`.
+const OTHERS = [
+  { source: 'neuf', tab: 'Logement neuf', key: '2109N0084499R', codePostal: '09100',
+    classe: 'A', day: '2021-07-06', address: '5 Lieu Dit Jouandou' },
+  { source: 'tertiaire', tab: 'Tertiaire', key: '2109T0155160Q', codePostal: '09100',
+    classe: 'C', day: '2021-08-08', address: '11 Rue Taillancier' },
+  { source: 'audit', tab: 'Audit énergétique', key: 'abacf936-8b57-46a1-b920-fc072cb29e7e',
+    codePostal: '09400', classe: 'F', day: '2023-09-05', address: '20 Rue du Barry' },
+] as const
+
+for (const t of OTHERS) {
+  test(`finds a ${t.tab} record and opens it from its own tree`, async ({ page }) => {
+    await signUpViaApi(page, uniqueEmail(`search-${t.source}`))
+    await page.goto('/')
+
+    await page.getByRole('radio', { name: t.tab }).check()
+    await page.getByLabel('Code postal').fill(t.codePostal)
+    await page.getByLabel('Classe énergie').selectOption(t.classe)
+    await page.getByLabel('Du', { exact: true }).fill(t.day)
+    await page.getByLabel('Au', { exact: true }).fill(t.day)
+    await page.getByRole('button', { name: 'Rechercher' }).click()
+
+    // The link names the source and the partition, so the detail reads one
+    // known file of the right tree.
+    const link = page.locator(`a[href="#/${t.source}/09/${t.key}"]`)
+    await expect(link).toBeVisible({ timeout: 60_000 })
+    await link.click()
+    await expect(page.getByRole('heading', { name: new RegExp(t.address) })).toBeVisible({
+      timeout: 30_000,
+    })
+  })
+}

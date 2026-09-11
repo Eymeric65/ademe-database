@@ -174,11 +174,14 @@ export default function App() {
           <Saved signedIn={Boolean(account)} />
         ) : route.name === 'detail' ? (
           account ? (
-            <Detail numero={route.numero} />
+            <Detail
+              key={`${route.source}/${route.dept ?? ''}/${route.key}`}
+              record={{ source: route.source, key: route.key, dept: route.dept }}
+            />
           ) : (
             <Gate
               title="Ce certificat DPE demande un compte"
-              lede="Le diagnostic est public. Connectez-vous pour lire ses 226 données et le garder dans vos certificats."
+              lede="Le diagnostic est public. Connectez-vous pour lire toutes ses données et le garder dans vos certificats."
               cta="Se connecter et consulter"
               onSignIn={() => void signInWithGoogle()}
             />
