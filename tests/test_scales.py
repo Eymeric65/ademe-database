@@ -7,7 +7,8 @@ from decimal import Decimal
 
 import pytest
 
-from ademe import scales
+from ademe import db, ingest, reconstruct, scales, schema, spec
+from tests.test_export_parquet import SCALES, _row
 
 
 @pytest.mark.parametrize(
@@ -92,3 +93,48 @@ def test_scaling_round_trips_exactly(raw):
     stored = int((Decimal(raw) * scale).to_integral_value())
     back = Decimal(stored) / Decimal(scale)
     assert f"{back:.{d}f}" == f"{Decimal(raw):.{d}f}"
+
+
+def _load_like_the_cli(path, row):
+    """What `python -m ademe.ingest` does: read the recorded scales back, load."""
+    conn = db.connect(path, bulk=True)
+    recorded = {
+        r["column_name"]: r["scale"]
+        for r in conn.execute("SELECT column_name, scale FROM column_meta WHERE scale != 1")
+    }
+    ingest.Loader(conn, spec.load(recorded)).load_page([row])
+    conn.commit()
+    return conn
+
+
+def test_a_column_too_precise_to_scale_keeps_its_text_through_the_build_order(tmp_path):
+    """The national builds run `ademe.schema`, then `ademe.scales`. The schema is
+    generated before any scale is known, so every numeric column is declared
+    INTEGER, and `scales` used to rewrite only column_meta. A column too precise
+    to scale was then stored as text in an INTEGER column, and SQLite's affinity
+    converted it: '78.50' came back '78.5'. 119 columns of the energy audits,
+    millions of values, found when the export refused a REAL. See ADR-0032.
+    """
+    path = tmp_path / "t.sqlite"
+    schema.build(path)  # `python -m ademe.schema`: no scale known yet
+    scales.store(path, dict(SCALES, surface_habitable_logement=scales.TEXT_SENTINEL))
+
+    conn = _load_like_the_cli(
+        path, _row("2409E0000001", "09001", "09", surface_habitable_logement="78.50")
+    )
+    declared = {r["name"]: r["type"] for r in conn.execute("PRAGMA table_info(dpe)")}
+    got = reconstruct.Reconstructor(conn).row("2409E0000001")["surface_habitable_logement"]
+    conn.close()
+    assert (got, declared["surface_habitable_logement"]) == ("78.50", "TEXT")
+
+
+def test_scales_cannot_change_under_loaded_rows(tmp_path):
+    """The scales are how the stored integers are read back. Changed after the
+    load, every value already stored would be decoded with a scale it was not
+    encoded with, silently."""
+    path = tmp_path / "t.sqlite"
+    schema.build(path)
+    scales.store(path, dict(SCALES))
+    _load_like_the_cli(path, _row("2409E0000001", "09001", "09")).close()
+    with pytest.raises(SystemExit, match="already holds"):
+        scales.store(path, dict(SCALES, surface_habitable_logement=100))

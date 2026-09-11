@@ -63,10 +63,14 @@ def test_scales_samples_the_sources_own_dataset(neuf, monkeypatch):
         return {}, {}, 0
 
     monkeypatch.setattr(scales, "discover", discover)
-    monkeypatch.setattr(scales, "store", lambda path, s: seen.update(path=path))
+    monkeypatch.setattr(
+        scales, "store", lambda path, s, source: seen.update(path=path, stored_for=source)
+    )
     monkeypatch.setattr(scales.api, "client", lambda: None)
     assert scales.main(["--source", "neuf-like"]) == 0
     assert seen["source"] is neuf and seen["path"] == neuf.db_path
+    # The schema is rebuilt under the scales, so it must be the source's own (ADR-0032).
+    assert seen["stored_for"] is neuf
     # The source's own numeric columns, not existing housing's.
     assert not seen["numeric"] & NEUF_ABSENT
 
