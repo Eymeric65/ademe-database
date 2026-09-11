@@ -187,6 +187,7 @@ compared against live ADEME records. That test is the definition of "lossless" h
 | `uv run python -m ademe.finalise` | indexes, `foreign_key_check`, ANALYZE, row count |
 | `uv run python -m ademe.export_parquet --out DIR` | SQLite → partitioned Parquet |
 | `uv run python -m ademe.delta --base-url URL --out DIR` | fetch what changed and merge it in |
+| `uv run python -m ademe.rnb --out DIR [--dept 09]` | RNB buildings → `DIR/v1/rnb/`, re-fetching only what changed |
 | `uv run python scripts/reconcile.py --root DIR/v1` | check every partition against ADEME |
 
 ## Layout

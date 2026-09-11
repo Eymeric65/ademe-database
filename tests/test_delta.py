@@ -115,6 +115,52 @@ def test_the_untouched_partition_is_carried_over_byte_for_byte(base, tmp_path):
     assert before == after
 
 
+def _physical_columns(path) -> list[str]:
+    """The columns stored in the file. `hive_partitioning = false` because
+    DuckDB otherwise reads the `dept=09` directory as one more column."""
+    return [
+        r[0]
+        for r in duckdb.connect()
+        .execute(f"DESCRIBE SELECT * FROM read_parquet('{path}', hive_partitioning = false)")
+        .fetchall()
+    ]
+
+
+def test_a_merged_partition_has_exactly_the_columns_the_export_wrote(base, tmp_path):
+    """The merge reads the published file with SELECT *, and a file under
+    `dept=09/` reads with a `dept` column it does not contain. Written back,
+    that column becomes real: every partition a weekly delta touches would
+    gain a 229th column the export never wrote, and the detail view would show
+    it."""
+    published, _ = base
+    dpath, dconn = _build(tmp_path, "delta", [_row("2409E0000009", "09", "2026-09-01")])
+    delta_dir = tmp_path / "delta-out"
+    export_parquet.export(dpath, delta_dir)
+    dconn.close()
+
+    merged = tmp_path / "merged"
+    delta.merge(published, delta_dir / export_parquet.VERSION, merged)
+
+    for kind in ("dpe", "search"):
+        assert _physical_columns(merged / kind / "dept=09" / "part-0000.parquet") == _physical_columns(
+            published / kind / "dept=09" / "part-0000.parquet"
+        ), kind
+
+
+def test_a_partition_rewritten_for_deletions_keeps_the_export_columns(base, tmp_path, monkeypatch):
+    """The same SELECT *, in the reconciliation's rewrite."""
+    published, _ = base
+    fake = FakeApi({"09": ["2409E0000001"], "31": ["2431E0000001"]})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+
+    out = tmp_path / "reconciled"
+    delta.apply_deletions(published, delta.reconcile(None, published), out)
+    assert _physical_columns(out / "dpe" / "dept=09" / "part-0000.parquet") == _physical_columns(
+        published / "dpe" / "dept=09" / "part-0000.parquet"
+    )
+
+
 def test_the_search_file_stays_sorted_after_a_merge(base, tmp_path):
     """The whole layout rests on row-group statistics, which mean nothing if a
     merge appends the delta instead of re-sorting."""

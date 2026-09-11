@@ -59,9 +59,12 @@ def test_spec_reads_the_schema_of_the_source_it_is_given(other):
 def test_headers_are_renamed_with_the_sources_own_labels(other):
     row = {"numero_dpe": "2409E0000001", "adresse_brut": "3 rue de Test"}
     assert spec.rename_row(row, source=other) == row
-    # The same header means a different column in existing housing -- which is
-    # exactly what the other source's rows would have been given before.
-    assert spec.rename_row(row)["adresse_complete_brut"] == "3 rue de Test"
+    # Existing housing's export heads `conso_5_usages_ef` as `conso_5 usages_ef`.
+    # Renamed with the other source's labels, the same header is left alone:
+    # each source's rows go through its own map, never another's.
+    header = {"conso_5 usages_ef": "38"}
+    assert spec.rename_row(header) == {"conso_5_usages_ef": "38"}
+    assert spec.rename_row(header, source=other) == header
 
 
 def _server(seen: list[httpx.Request]) -> httpx.Client:
