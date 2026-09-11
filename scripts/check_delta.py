@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 from ademe import delta
+from ademe.config import EXISTANT, SOURCES
 
 
 def load_runs(base_url: str) -> list[dict]:
@@ -39,9 +40,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--base-url", required=True)
+    ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
     args = ap.parse_args(argv)
 
-    new = json.loads((args.out / "v1" / "manifest.json").read_text())
+    new = json.loads((args.out / "v1" / SOURCES[args.source].subdir / "manifest.json").read_text())
     old = delta.read_manifest(args.base_url)
     before = sum(p["rows"] for p in old["partitions"])
     after = sum(p["rows"] for p in new["partitions"])
