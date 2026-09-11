@@ -21,7 +21,7 @@ import urllib.request
 import pytest
 
 from ademe import spec
-from ademe.config import API
+from ademe.config import API, SCHEMA_JSON
 from ademe.mapping import INTERNAL_COLUMNS
 
 
@@ -44,7 +44,7 @@ def domains():
 def test_aliased_columns_really_share_one_vocabulary(domains):
     """Explicit aliases are semantic claims and are checked strictly."""
     aliased: dict[str, list[str]] = {}
-    for col, dom in spec._domains().items():
+    for col, dom in spec._domains(SCHEMA_JSON).items():
         _, _, was_aliased = spec._stem(col)
         if was_aliased:
             aliased.setdefault(dom, []).append(col)
