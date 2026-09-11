@@ -896,7 +896,10 @@ h1 {
 }
 
 .fact dt {
-  /* The column's French name; its ADEME key is in the title and the hint. */
+  /* The column's French name; its ADEME key is in the title and the hint.
+     A small basis, so a long name wraps beside its value instead of pushing
+     the value onto a line of its own (the row wraps, for the hint). */
+  flex: 1 1 7rem;
   font-size: 0.76rem;
   color: var(--color-muted);
   min-width: 0;
@@ -904,7 +907,7 @@ h1 {
 }
 
 .fact dd {
-  margin: 0;
+  margin: 0 0 0 auto;
   text-align: right;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;

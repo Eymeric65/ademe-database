@@ -35,6 +35,9 @@ describe('formatValue', () => {
     expect(fmt('surface_habitable_logement', 113.9)).toBe('113,9 m²')
     expect(fmt('hauteur_sous_plafond', 2.5)).toBe('2,5 m')
     expect(fmt('volume_stockage_generateur_n1_ecs_n1', 300)).toBe('300 L')
+    // Not in any schema: the ETL adds them. Six decimals is ten centimetres.
+    expect(fmt('lon', 1.6274339999999998)).toBe('1,627434')
+    expect(fmt('lat', 42.846709999999995)).toBe('42,84671')
   })
 
   it('keeps euros whole', () => {

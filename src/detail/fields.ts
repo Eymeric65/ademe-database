@@ -32,6 +32,7 @@ const UNITS = {
   m: { steps: ['m'], digits: 2 },
   l: { steps: ['L'] },
   ratio: { steps: [''], digits: 2 },
+  deg: { steps: [''], digits: 6 },
 } satisfies Record<string, Unit>
 
 /** `pct` is a 0–1 fraction shown as a percentage; `flag` a 0/1 answer. */
@@ -149,8 +150,8 @@ const FIELDS: Record<string, Field> = {
   nom_residence: F('Résidence', 'Nom de la résidence ou de l’ensemble immobilier.'),
   coordonnee_cartographique_x_ban: F('Coordonnée X', 'Abscisse de l’adresse en projection Lambert 93.', 'm'),
   coordonnee_cartographique_y_ban: F('Coordonnée Y', 'Ordonnée de l’adresse en projection Lambert 93.', 'm'),
-  lat: F('Latitude', 'Position de l’adresse, en degrés.'),
-  lon: F('Longitude', 'Position de l’adresse, en degrés.'),
+  lat: F('Latitude', 'Position de l’adresse, en degrés.', 'deg'),
+  lon: F('Longitude', 'Position de l’adresse, en degrés.', 'deg'),
   score_ban: F(
     'Fiabilité du géocodage',
     'Confiance de la Base Adresse Nationale dans la correspondance entre l’adresse saisie et celle retenue. Basse, l’adresse peut être fausse.',
