@@ -77,6 +77,32 @@ SEARCH: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     "existant": (SEARCH_COLUMNS, SEARCH_SORT),
     # New housing has every one of these columns. ADR-0025.
     "neuf": (SEARCH_COLUMNS, SEARCH_SORT),
+    # An audit step: which audit, which DPE, which scenario and step. It
+    # carries the key, which the weekly merge anti-joins on. ADR-0031.
+    "audit": (
+        (
+            "id_etape",
+            "n_audit",
+            "numero_dpe",
+            "categorie_scenario",
+            "etape_travaux",
+            "n_departement_ban",
+            "code_postal_ban",
+            "code_insee_ban",
+            "nom_commune_ban",
+            "adresse_ban",
+            "classe_bilan_dpe",
+            "etiquette_ges",
+            "date_etablissement_audit",
+            "surface_habitable_logement",
+            "ep_conso_5_usages_m2",
+            "emission_ges_5_usages_m2",
+            "annee_construction",
+            "lat",
+            "lon",
+        ),
+        ("code_postal_ban", "n_audit", "id_etape"),
+    ),
     # A tertiary building has no dwelling area: its own index. ADR-0026.
     "tertiaire": (
         (

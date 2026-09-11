@@ -146,6 +146,40 @@ jobs:
           rclone copy out/v1/tertiaire/index  r2:ademe-dpe/v1/tertiaire/index  --checksum
           rclone copyto out/v1/tertiaire/manifest.json r2:ademe-dpe/v1/tertiaire/manifest.json
 
+      - name: Energy audits, published?
+        id: audit
+        run: |
+          if curl -sf -o /dev/null -A "ademe-database/0.1 (weekly)" "$DATA_BASE_URL/audit/manifest.json"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::the energy audits are not published yet; skipped"
+          fi
+
+      - name: Energy audits, fetch, merge, reconcile, check
+        id: audit_delta
+        if: steps.audit.outputs.published == 'true'
+        run: |
+          uv run python -m ademe.delta --source audit --base-url "$DATA_BASE_URL/audit" --out out
+          if [ ! -f out/v1/audit/manifest.json ]; then exit 0; fi
+          uv run python scripts/reconcile.py --source audit --root out/v1/audit --out reconciled
+          if [ -d reconciled/v1/audit ]; then rm -rf out/v1/audit && mv reconciled/v1/audit out/v1/audit; fi
+          uv run python scripts/check_delta.py --source audit --out out --base-url "$DATA_BASE_URL/audit"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Energy audits, upload
+        if: steps.audit_delta.outputs.changed == 'true'
+        env:
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          rclone copy out/v1/audit/search r2:ademe-dpe/v1/audit/search --checksum
+          rclone copy out/v1/audit/dpe    r2:ademe-dpe/v1/audit/dpe    --checksum
+          rclone copy out/v1/audit/index  r2:ademe-dpe/v1/audit/index  --checksum
+          rclone copyto out/v1/audit/manifest.json r2:ademe-dpe/v1/audit/manifest.json
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

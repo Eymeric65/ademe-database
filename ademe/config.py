@@ -59,7 +59,16 @@ TERTIAIRE = Source(
     subdir="tertiaire",
     mapping=_mapping.TERTIAIRE,
 )
-SOURCES = {s.slug: s for s in (EXISTANT, NEUF, TERTIAIRE)}
+# The energy audits, one row per audit step. ADR-0031.
+AUDIT = Source(
+    slug="audit",
+    dataset="ync2epx48x9azbdnggbygqp0",
+    schema_json=REPO / "schema" / "audit-schema.json",
+    db_path=DEFAULT_DB.with_name("ademe-audit.sqlite"),
+    subdir="audit",
+    mapping=_mapping.AUDIT,
+)
+SOURCES = {s.slug: s for s in (EXISTANT, NEUF, TERTIAIRE, AUDIT)}
 
 # Existing housing, under the names every module used before there was a second.
 SCHEMA_JSON = EXISTANT.schema_json
