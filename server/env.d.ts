@@ -21,4 +21,10 @@ interface Env {
    * production -- see the trap in server/db.ts and ADR-0008.
    */
   AUTH_TEST_CREDENTIALS?: string
+
+  /**
+   * The one preview host registered with Google. Branch previews send their
+   * Google sign-in through it. Preview only, NEVER production -- see ADR-0036.
+   */
+  OAUTH_PROXY_URL?: string
 }
