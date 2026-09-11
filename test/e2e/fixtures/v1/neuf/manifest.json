@@ -1,21 +1,21 @@
 {
   "version": "v1",
-  "built_at": "2026-09-11T04:15:59+00:00",
-  "schema_sha256": "62a7efcdfc5ac614c6038c47036c55ae3f3491d298d78bb09feadb2a860565c5",
+  "built_at": "2026-09-11T04:21:29+00:00",
+  "schema_sha256": "a2c17206fc0f185675343d80d2ea12c2fb0e83657517538e7e321958e980e1c7",
   "high_water": "2026-09-07",
   "column_meta": {
     "adresse_ban": {
-      "encoding": "text",
+      "encoding": "vocab_open",
       "scale": 1,
       "destination": "adresse"
     },
     "adresse_brut": {
-      "encoding": "text",
+      "encoding": "vocab_open",
       "scale": 1,
       "destination": "dpe_adresse_brut"
     },
     "adresse_complete_brut": {
-      "encoding": "text",
+      "encoding": "vocab_open",
       "scale": 1,
       "destination": "dpe_adresse_brut"
     },
@@ -29,26 +29,6 @@
       "scale": 1,
       "destination": "dpe"
     },
-    "apport_interne_saison_chauffe": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe"
-    },
-    "apport_interne_saison_froide": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe"
-    },
-    "apport_solaire_saison_chauffe": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe"
-    },
-    "apport_solaire_saison_froide": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe"
-    },
     "besoin_chauffage": {
       "encoding": "scaled",
       "scale": 10,
@@ -60,13 +40,13 @@
       "destination": "dpe"
     },
     "besoin_ecs_batiment": {
-      "encoding": "int",
-      "scale": 1,
+      "encoding": "scaled",
+      "scale": 10,
       "destination": "dpe"
     },
     "besoin_ecs_logement": {
-      "encoding": "int",
-      "scale": 1,
+      "encoding": "scaled",
+      "scale": 10,
       "destination": "dpe"
     },
     "besoin_refroidissement": {
@@ -115,12 +95,12 @@
       "destination": "commune"
     },
     "complement_adresse_batiment": {
-      "encoding": "text",
+      "encoding": "vocab_open",
       "scale": 1,
       "destination": "dpe_adresse_brut"
     },
     "complement_adresse_logement": {
-      "encoding": "text",
+      "encoding": "vocab_open",
       "scale": 1,
       "destination": "dpe_adresse_brut"
     },
@@ -210,23 +190,23 @@
       "destination": "dpe"
     },
     "conso_chauffage_generateur_n1_installation_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_chauffage"
     },
     "conso_chauffage_generateur_n1_installation_n2": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_chauffage"
     },
     "conso_chauffage_generateur_n2_installation_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_chauffage"
     },
     "conso_chauffage_generateur_n2_installation_n2": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_chauffage"
     },
     "conso_chauffage_installation_chauffage_n1": {
@@ -275,8 +255,8 @@
       "destination": "dpe"
     },
     "conso_ef_generateur_n1_ecs_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_ecs"
     },
     "conso_ef_generateur_n2_ecs_n1": {
@@ -315,8 +295,8 @@
       "destination": "dpe"
     },
     "cop_generateur_n1_ecs_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_ecs"
     },
     "cop_generateur_n2_ecs_n1": {
@@ -414,16 +394,6 @@
       "scale": 1,
       "destination": "dpe"
     },
-    "date_installation_generateur_n1_ecs_n1": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe_generateur_ecs"
-    },
-    "date_installation_generateur_n2_ecs_n1": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe_generateur_ecs"
-    },
     "date_reception_dpe": {
       "encoding": "date",
       "scale": 1,
@@ -474,33 +444,23 @@
       "scale": 10,
       "destination": "dpe"
     },
-    "description_generateur_chauffage_n1_installation_n1": {
-      "encoding": "vocab_open",
-      "scale": 1,
-      "destination": "dpe_generateur_chauffage"
+    "deperditions_totales_batiment": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe"
     },
-    "description_generateur_chauffage_n1_installation_n2": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe_generateur_chauffage"
-    },
-    "description_generateur_chauffage_n2_installation_n1": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe_generateur_chauffage"
-    },
-    "description_generateur_chauffage_n2_installation_n2": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe_generateur_chauffage"
+    "deperditions_totales_logement": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe"
     },
     "description_generateur_froid": {
-      "encoding": "vocab_open",
+      "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe"
     },
     "description_generateur_n1_ecs_n1": {
-      "encoding": "vocab_open",
+      "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe_generateur_ecs"
     },
@@ -510,23 +470,23 @@
       "destination": "dpe_generateur_ecs"
     },
     "description_installation_chauffage_n1": {
-      "encoding": "vocab_open",
+      "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe_installation_chauffage"
     },
     "description_installation_chauffage_n2": {
-      "encoding": "vocab_open",
+      "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe_installation_chauffage"
     },
     "description_installation_ecs_n1": {
-      "encoding": "vocab_open",
+      "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe_installation_ecs"
     },
     "electricite_pv_autoconsommee": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe"
     },
     "emission_ges_5_usages": {
@@ -619,48 +579,18 @@
       "scale": 1,
       "destination": "dpe"
     },
-    "facteur_couverture_solaire_installation_chauffage_n1": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe_installation_chauffage"
-    },
-    "facteur_couverture_solaire_installation_chauffage_n2": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe_installation_chauffage"
-    },
-    "facteur_couverture_solaire_n1": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe_installation_ecs"
-    },
-    "facteur_couverture_solaire_saisi_installation_chauffage_n1": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe_installation_chauffage"
-    },
-    "facteur_couverture_solaire_saisi_installation_chauffage_n2": {
-      "encoding": "int",
-      "scale": 1,
-      "destination": "dpe_installation_chauffage"
-    },
-    "facteur_couverture_solaire_saisi_n1": {
-      "encoding": "scaled",
-      "scale": 10,
-      "destination": "dpe_installation_ecs"
-    },
     "hauteur_sous_plafond": {
       "encoding": "scaled",
       "scale": 10,
       "destination": "dpe"
     },
     "id_rnb": {
-      "encoding": "text",
+      "encoding": "vocab_open",
       "scale": 1,
       "destination": "dpe"
     },
     "identifiant_ban": {
-      "encoding": "text",
+      "encoding": "vocab_open",
       "scale": 1,
       "destination": "adresse"
     },
@@ -720,8 +650,8 @@
       "destination": "dpe"
     },
     "nombre_logements_desservis_par_installation_ecs_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_installation_ecs"
     },
     "nombre_module": {
@@ -760,12 +690,12 @@
       "destination": "dpe"
     },
     "numero_immatriculation_copropriete": {
-      "encoding": "vocab_open",
+      "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe"
     },
     "numero_rpls_logement": {
-      "encoding": "vocab_open",
+      "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe"
     },
@@ -775,11 +705,6 @@
       "destination": "adresse"
     },
     "periode_construction": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe"
-    },
-    "periode_installation_generateur_froid": {
       "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe"
@@ -800,8 +725,8 @@
       "destination": "dpe"
     },
     "production_ecs_solaire_installation_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_installation_ecs"
     },
     "production_electricite_pv_kwhep_par_an": {
@@ -840,16 +765,6 @@
       "destination": "dpe"
     },
     "qualite_isolation_plancher_haut_comble_amenage": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe"
-    },
-    "qualite_isolation_plancher_haut_comble_perdu": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe"
-    },
-    "qualite_isolation_plancher_haut_toit_terrasse": {
       "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe"
@@ -900,8 +815,8 @@
       "destination": "dpe"
     },
     "surface_totale_capteurs_pv": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe"
     },
     "surface_ventilee": {
@@ -928,11 +843,6 @@
       "encoding": "vocab_closed",
       "scale": 1,
       "destination": "dpe_installation_chauffage"
-    },
-    "type_energie_climatisation": {
-      "encoding": "vocab_closed",
-      "scale": 1,
-      "destination": "dpe"
     },
     "type_energie_generateur_n1_ecs_n1": {
       "encoding": "vocab_closed",
@@ -1120,8 +1030,8 @@
       "destination": "dpe"
     },
     "volume_stockage_generateur_n1_ecs_n1": {
-      "encoding": "scaled",
-      "scale": 10,
+      "encoding": "int",
+      "scale": 1,
       "destination": "dpe_generateur_ecs"
     },
     "volume_stockage_generateur_n2_ecs_n1": {
@@ -1161,16 +1071,16 @@
       "codes": [
         "09"
       ],
-      "rows": 400,
+      "rows": 100,
       "search": {
         "path": "search/dept=09/part-0000.parquet",
-        "bytes": 19273,
-        "sha256": "2fd1b1e69b0e7a53958df65db255bdfcf28b21c29c325018e8e3387d4273303f"
+        "bytes": 7825,
+        "sha256": "0af9ca72f7a1e2b7c00cb1505ac7733e4483e5fc0ac1dcae04502655d3683076"
       },
       "dpe": {
         "path": "dpe/dept=09/part-0000.parquet",
-        "bytes": 188529,
-        "sha256": "0a03ef7521730fd2fa5740b21f10f703bf5f53dcf6fea182453fd592ad2fc929"
+        "bytes": 61379,
+        "sha256": "a7309ee006d35bf47ee6402a1bb5b39aa51833671d32f36476abe9c49a82fd60"
       }
     },
     {
@@ -1178,18 +1088,18 @@
       "codes": [
         "48"
       ],
-      "rows": 400,
+      "rows": 100,
       "search": {
         "path": "search/dept=48/part-0000.parquet",
-        "bytes": 18776,
-        "sha256": "6154958023394007ddb73c063a87b8c5f6f589c72ecd968eefbe83995ce9ec4a"
+        "bytes": 7573,
+        "sha256": "ae201d98437f68b6aa08bfb41d5457d65dbcf53ccd64ef2e19851c9707012a73"
       },
       "dpe": {
         "path": "dpe/dept=48/part-0000.parquet",
-        "bytes": 186208,
-        "sha256": "d9a23519cb8211fec3df9d5e895b48393d0e5aab7dbca824920d08b5593a9186"
+        "bytes": 59522,
+        "sha256": "9a2b061b53d6053aec684097d20c3f20ee908462a87079f978c5fecc21856d05"
       }
     }
   ],
-  "sliced_from": "2026-09-11T04:15:59+00:00"
+  "sliced_from": "2026-09-11T04:21:29+00:00"
 }

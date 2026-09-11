@@ -1,0 +1,391 @@
+{
+  "version": "v1",
+  "built_at": "2026-09-11T04:22:22+00:00",
+  "schema_sha256": "41a502bc242db8e07df6cc975a54d61967148e009714950338194b5f7c5814f5",
+  "high_water": "2026-09-07",
+  "column_meta": {
+    "adresse_ban": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "adresse"
+    },
+    "adresse_brut": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe_adresse_brut"
+    },
+    "adresse_complete_brut": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe_adresse_brut"
+    },
+    "annee_construction": {
+      "encoding": "int",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "annee_releve_conso_energie_n1": {
+      "encoding": "int",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "annee_releve_conso_energie_n2": {
+      "encoding": "int",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "annee_releve_conso_energie_n3": {
+      "encoding": "int",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "categorie_erp": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "code_departement_ban": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "commune"
+    },
+    "code_insee_ban": {
+      "encoding": "text",
+      "scale": 1,
+      "destination": "commune"
+    },
+    "code_postal_ban": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "adresse"
+    },
+    "code_postal_brut": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe_adresse_brut"
+    },
+    "code_region_ban": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "commune"
+    },
+    "complement_adresse_batiment": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe_adresse_brut"
+    },
+    "complement_adresse_logement": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe_adresse_brut"
+    },
+    "conso_ef_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "conso_ef_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "conso_ef_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "conso_ep_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "conso_ep_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "conso_ep_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "conso_kwhep_m2_an": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe"
+    },
+    "coordonnee_cartographique_x_ban": {
+      "encoding": "scaled",
+      "scale": 1000000,
+      "destination": "dpe"
+    },
+    "coordonnee_cartographique_y_ban": {
+      "encoding": "scaled",
+      "scale": 100,
+      "destination": "dpe"
+    },
+    "date_derniere_modification_dpe": {
+      "encoding": "date",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "date_etablissement_dpe": {
+      "encoding": "date",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "date_fin_validite_dpe": {
+      "encoding": "date",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "date_reception_dpe": {
+      "encoding": "date",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "date_visite_diagnostiqueur": {
+      "encoding": "date",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "emission_ges_kg_co2_m2_an": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe"
+    },
+    "etiquette_dpe": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "etiquette_ges": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "frais_annuel_energie_n1": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "frais_annuel_energie_n2": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "frais_annuel_energie_n3": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe_energie"
+    },
+    "id_rnb": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "identifiant_ban": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "adresse"
+    },
+    "methode_dpe": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "modele_dpe": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "nom_commune_ban": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "commune"
+    },
+    "nom_commune_brut": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe_adresse_brut"
+    },
+    "nom_residence": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe_adresse_brut"
+    },
+    "nom_rue_ban": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "adresse"
+    },
+    "nombre_occupant": {
+      "encoding": "int",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "numero_dpe": {
+      "encoding": "text",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "numero_dpe_immeuble_associe": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "numero_dpe_remplace": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "numero_etage_appartement": {
+      "encoding": "int",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "numero_immatriculation_copropriete": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "numero_voie_ban": {
+      "encoding": "vocab_open",
+      "scale": 1,
+      "destination": "adresse"
+    },
+    "periode_construction": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "provenance_id_rnb": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "score_ban": {
+      "encoding": "scaled",
+      "scale": 100,
+      "destination": "dpe"
+    },
+    "secteur_activite": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "statut_geocodage": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "surface_shon": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe"
+    },
+    "surface_utile": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe"
+    },
+    "type_energie_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "type_energie_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "type_energie_n3": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "type_energie_principale_chauffage": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe"
+    },
+    "type_usage_energie_n1": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "type_usage_energie_n2": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "type_usage_energie_n3": {
+      "encoding": "vocab_closed",
+      "scale": 1,
+      "destination": "dpe_energie"
+    },
+    "version_dpe": {
+      "encoding": "scaled",
+      "scale": 10,
+      "destination": "dpe"
+    }
+  },
+  "search_columns": [
+    "numero_dpe",
+    "code_departement_ban",
+    "code_postal_ban",
+    "code_insee_ban",
+    "nom_commune_ban",
+    "adresse_ban",
+    "etiquette_dpe",
+    "etiquette_ges",
+    "date_etablissement_dpe",
+    "surface_utile",
+    "conso_kwhep_m2_an",
+    "emission_ges_kg_co2_m2_an",
+    "secteur_activite",
+    "categorie_erp",
+    "annee_construction",
+    "periode_construction",
+    "lat",
+    "lon"
+  ],
+  "key": "numero_dpe",
+  "partitions": [
+    {
+      "dept": "09",
+      "codes": [
+        "09"
+      ],
+      "rows": 100,
+      "search": {
+        "path": "search/dept=09/part-0000.parquet",
+        "bytes": 8462,
+        "sha256": "b9e476e3b9e422f00ab9cec61bf1f0f7d9e15cab0a49d9e96107940d5558f5be"
+      },
+      "dpe": {
+        "path": "dpe/dept=09/part-0000.parquet",
+        "bytes": 31789,
+        "sha256": "05459e8f185a45c6a486da4ec63e8817554f658df7734bdf8db150d4d3996280"
+      }
+    },
+    {
+      "dept": "48",
+      "codes": [
+        "48"
+      ],
+      "rows": 100,
+      "search": {
+        "path": "search/dept=48/part-0000.parquet",
+        "bytes": 8422,
+        "sha256": "1bee03f5e5d4b1834fd5115399e8f2671b5878961ff3f334265047eac7290aec"
+      },
+      "dpe": {
+        "path": "dpe/dept=48/part-0000.parquet",
+        "bytes": 31310,
+        "sha256": "51e727ae7a835c9fb9b2bba2974167090bd35a94e39319b0040303fbc78c7794"
+      }
+    }
+  ],
+  "sliced_from": "2026-09-11T04:22:22+00:00"
+}
