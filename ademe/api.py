@@ -63,10 +63,11 @@ def _get(client: httpx.Client, url: str, params: dict | None = None) -> httpx.Re
     raise ApiError(f"{url}: giving up after {RETRIES} attempts ({last})")
 
 
-def _departement_qs(code: str) -> str:
+def _departement_qs(code: str, source: Source = EXISTANT) -> str:
+    field = source.mapping.departement
     if code == UNGEOCODED:
-        return "NOT _exists_:code_departement_ban"
-    return f'code_departement_ban:"{code}"'
+        return f"NOT _exists_:{field}"
+    return f'{field}:"{code}"'
 
 
 def total(
@@ -78,7 +79,7 @@ def total(
 ) -> int:
     params: dict = {"size": 0}
     if departement:
-        params["qs"] = _departement_qs(departement)
+        params["qs"] = _departement_qs(departement, source)
     elif qs:
         params["qs"] = qs
     return _get(client, f"{source.api}/lines", params).json()["total"]
@@ -141,7 +142,7 @@ def iter_pages(
         url = f"{source.api}/lines"
         params = {"size": page_size, "format": "csv", "sort": "_i"}
         if departement:
-            params["qs"] = _departement_qs(departement)
+            params["qs"] = _departement_qs(departement, source)
         elif qs:
             params["qs"] = qs
         if select:

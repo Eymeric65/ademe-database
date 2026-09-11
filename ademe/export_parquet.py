@@ -204,9 +204,10 @@ def wide_select(
         return narrowed.get(name, f"sq.{name}")
 
     plan = Plan(conn, source)
-    cols = [f'd.numero_dpe AS "numero_dpe"']
+    key = source.mapping.key
+    cols = [f'd.{key} AS "{key}"']
     for col in plan.meta:
-        if col == "numero_dpe":
+        if col == key:
             continue
         cols.append(f'{plan.expr(col)} AS "{col}"')
     # lat/lon are derived at export from the Lambert-93 pair (see ademe/geo.py
@@ -243,28 +244,28 @@ def wide_select(
 # --- export -----------------------------------------------------------------
 
 
-def _dept_source(conn) -> tuple[str, str, str]:
-    """(table, column, vocab domain) for `code_departement_ban`.
+def _dept_source(conn, source: Source = EXISTANT) -> tuple[str, str, str]:
+    """(table, column, vocab domain) for the source's departement field.
 
     Read from column_meta rather than hard-coded: the vocabulary table is named
     after the DOMAIN (`vocab_code_departement`), not after the source column,
     and guessing that got it wrong.
     """
     r = conn.execute(
-        "SELECT destination, dest_column, domain FROM column_meta"
-        " WHERE column_name = 'code_departement_ban'"
+        "SELECT destination, dest_column, domain FROM column_meta WHERE column_name = ?",
+        (source.mapping.departement,),
     ).fetchone()
     return r["destination"], r["dest_column"], r["domain"]
 
 
-def _dept_join(conn, alias_c: str = "c", alias_v: str = "v") -> str:
+def _dept_join(conn, source: Source = EXISTANT, alias_c: str = "c", alias_v: str = "v") -> str:
     """The join reaching the decoded departement code, whatever table it is on."""
-    table, column, domain = _dept_source(conn)
+    table, column, domain = _dept_source(conn, source)
     return f"JOIN vocab_{domain} {alias_v} ON {alias_v}.id = {alias_c}.{column}"
 
 
-def _departements(conn) -> list[str]:
-    _, column, domain = _dept_source(conn)
+def _departements(conn, source: Source = EXISTANT) -> list[str]:
+    _, column, domain = _dept_source(conn, source)
     codes = [
         r[0]
         for r in conn.execute(
@@ -286,7 +287,9 @@ def _departements(conn) -> list[str]:
     return codes
 
 
-def _geopoint_rows(conn, codes: list[str]) -> list[tuple[int, float | None, float | None]]:
+def _geopoint_rows(
+    conn, codes: list[str], source: Source = EXISTANT
+) -> list[tuple[int, float | None, float | None]]:
     """(dpe_id, lat, lon) for one partition, projected in Python.
 
     Small enough to materialise: one row per certificate, three numbers.
@@ -297,7 +300,7 @@ def _geopoint_rows(conn, codes: list[str]) -> list[tuple[int, float | None, floa
         " FROM dpe d"
         " JOIN adresse a ON a.adresse_id = d.adresse_id"
         " JOIN commune c ON c.commune_id = a.commune_id"
-        f" {_dept_join(conn)}"
+        f" {_dept_join(conn, source)}"
         f" WHERE v.code IN ({marks})",
         codes,
     ).fetchall()
@@ -344,7 +347,8 @@ def export(
     root = Path(out_dir) / VERSION / source.subdir
     root.mkdir(parents=True, exist_ok=True)
 
-    codes = depts or _departements(conn)
+    codes = depts or _departements(conn, source)
+    key = source.mapping.key
     by_partition: dict[str, list[str]] = {}
     for code in codes:
         by_partition.setdefault(partition_of(code), []).append(code)
@@ -358,7 +362,7 @@ def export(
 
     for part, part_codes in sorted(by_partition.items()):
         quoted = ", ".join(f"'{c}'" for c in part_codes)
-        _, dept_col, dept_domain = _dept_source(conn)
+        _, dept_col, dept_domain = _dept_source(conn, source)
         if part == UNGEOCODED:
             where = (
                 "d.dpe_id IN (SELECT d2.dpe_id FROM sq.dpe d2"
@@ -377,7 +381,7 @@ def export(
             )
 
         duck.execute("CREATE OR REPLACE TEMP TABLE geopoint (dpe_id BIGINT, lat DOUBLE, lon DOUBLE)")
-        rows = _geopoint_rows(conn, part_codes)
+        rows = _geopoint_rows(conn, part_codes, source)
         if rows:
             duck.executemany("INSERT INTO geopoint VALUES (?, ?, ?)", rows)
 
@@ -411,7 +415,7 @@ def export(
         search_path.parent.mkdir(parents=True, exist_ok=True)
 
         duck.execute(
-            f"COPY (SELECT * FROM wide ORDER BY numero_dpe) TO '{dpe_path}'"
+            f"COPY (SELECT * FROM wide ORDER BY {key}) TO '{dpe_path}'"
             f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {DPE_ROW_GROUP})"
         )
         cols = ", ".join(f'"{c}"' for c in search_columns)
@@ -422,12 +426,13 @@ def export(
         )
 
         # A numero whose embedded departement disagrees with its partition
-        # cannot be found by the detail view's substring shortcut (PR11).
+        # cannot be found by the detail view's substring shortcut (PR11). The
+        # shortcut is numero_dpe's alone; another key has no such index.
         for (numero,) in duck.execute(
             "SELECT numero_dpe FROM wide WHERE substr(numero_dpe, 3, 2) != ?"
             " OR numero_dpe IS NULL",
             [part],
-        ).fetchall():
+        ).fetchall() if key == "numero_dpe" else []:
             exceptions.append((numero, part))
 
         partitions.append(
@@ -462,12 +467,12 @@ def export(
     # that copy is the truth, so it ships beside the data and read_rows prefers
     # it. Expected empty -- but departement 09 alone has eleven.
     viol = conn.execute(
-        "SELECT d.numero_dpe, s.column_name, s.raw_value FROM scale_violation s"
-        " JOIN dpe d ON d.dpe_id = s.dpe_id ORDER BY d.numero_dpe, s.column_name"
+        f"SELECT d.{key}, s.column_name, s.raw_value FROM scale_violation s"
+        f" JOIN dpe d ON d.dpe_id = s.dpe_id ORDER BY d.{key}, s.column_name"
     ).fetchall()
     duck.execute(
         "CREATE OR REPLACE TEMP TABLE viol"
-        " (numero_dpe VARCHAR, column_name VARCHAR, raw_value VARCHAR)"
+        f" ({key} VARCHAR, column_name VARCHAR, raw_value VARCHAR)"
     )
     if viol:
         duck.executemany("INSERT INTO viol VALUES (?, ?, ?)", [tuple(r) for r in viol])
@@ -476,19 +481,21 @@ def export(
         f" (FORMAT parquet, {COMPRESSION})"
     )
 
-    manifest = write_manifest(conn, root, partitions, search_columns)
+    manifest = write_manifest(conn, root, partitions, search_columns, source)
     duck.close()
     conn.close()
     return manifest
 
 
 def write_manifest(
-    conn, root: Path, partitions: list[dict], search_columns: tuple[str, ...] = SEARCH_COLUMNS
+    conn,
+    root: Path,
+    partitions: list[dict],
+    search_columns: tuple[str, ...] = SEARCH_COLUMNS,
+    source: Source = EXISTANT,
 ) -> dict:
     src = conn.execute("SELECT * FROM data_source").fetchone()
-    high = conn.execute(
-        "SELECT MAX(date_derniere_modification_dpe) FROM dpe"
-    ).fetchone()[0]
+    high = conn.execute(f"SELECT MAX({source.mapping.modified}) FROM dpe").fetchone()[0]
     manifest = {
         "version": VERSION,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -515,6 +522,9 @@ def write_manifest(
             )
         },
         "search_columns": list(search_columns),
+        # The record key, so a reader of the files needs no source registry
+        # to find a row. ADR-0029.
+        "key": source.mapping.key,
         "partitions": partitions,
     }
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
@@ -549,18 +559,22 @@ def read_rows(out_dir: Path, numeros: list[str]) -> dict[str, dict[str, str]]:
     root = Path(out_dir)
     manifest = json.loads((root / "manifest.json").read_text())
     meta = manifest["column_meta"]
+    # A manifest from before ADR-0029 names no key: it was numero_dpe.
+    key = manifest.get("key", "numero_dpe")
 
     duck = duckdb.connect()
     files = str(root / "dpe" / "*" / "*.parquet")
     marks = ",".join("?" * len(numeros))
     cur = duck.execute(
-        f"SELECT * FROM read_parquet('{files}') WHERE numero_dpe IN ({marks})", numeros
+        f"SELECT * FROM read_parquet('{files}', hive_partitioning = false)"
+        f" WHERE {key} IN ({marks})",
+        numeros,
     )
     names = [d[0] for d in cur.description]
     out: dict[str, dict[str, str]] = {}
     for row in cur.fetchall():
         rec = dict(zip(names, row))
-        numero = rec["numero_dpe"]
+        numero = rec[key]
         out[numero] = {
             c: _fmt(v, meta[c]["encoding"], meta[c]["scale"]) if c in meta else
                ("" if v is None else str(v))
@@ -572,8 +586,8 @@ def read_rows(out_dir: Path, numeros: list[str]) -> dict[str, dict[str, str]]:
     vpath = root / "index" / "scale-violation.parquet"
     if vpath.exists() and out:
         for numero, col, raw in duck.execute(
-            f"SELECT numero_dpe, column_name, raw_value FROM read_parquet('{vpath}')"
-            f" WHERE numero_dpe IN ({marks})",
+            f"SELECT {key}, column_name, raw_value FROM read_parquet('{vpath}')"
+            f" WHERE {key} IN ({marks})",
             numeros,
         ).fetchall():
             if numero in out:

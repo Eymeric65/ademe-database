@@ -28,6 +28,7 @@ def _fmt_scaled(value: int, scale: int) -> str:
 class Reconstructor:
     def __init__(self, conn, source: Source = EXISTANT):
         self.conn = conn
+        self.key = source.mapping.key
         self.repeats = source.mapping.repeats
         self.meta = {
             r["column_name"]: dict(r)
@@ -66,9 +67,10 @@ class Reconstructor:
             return str(int(raw))
         return str(raw)
 
-    def row(self, numero_dpe: str) -> dict[str, str] | None:
+    def row(self, key: str) -> dict[str, str] | None:
+        """One record, by the source's own key (ADR-0029)."""
         cur = self.conn.execute(
-            "SELECT * FROM dpe WHERE numero_dpe = ?", (numero_dpe,)
+            f"SELECT * FROM dpe WHERE {self.key} = ?", (key,)
         ).fetchone()
         if cur is None:
             return None
