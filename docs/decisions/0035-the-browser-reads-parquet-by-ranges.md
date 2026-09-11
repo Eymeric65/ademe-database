@@ -59,7 +59,15 @@ all 103 partitions.
 
 Chosen option: **"ranged reads end to end"**, because it is the only one that
 makes a Paris detail a footer and one row group again without touching the
-published layout.
+published layout -- with one measured exception for small search files.
+
+Every range read is a sequential round trip of about 150 ms through the Worker
+and R2. Ranged, the Paris search became 35 reads: 2 MB, but 6.4 s against the
+4 s its whole 15 MB file had taken. A typical département's search file is
+about 3 MB, which one request fetches faster than any number of ranges. So a
+search file of **4 MB or less is fetched whole**, once per session, and handed
+to DuckDB as a registered buffer; a larger one is read by ranges. Detail,
+crosswalk, RNB and cadastre files are always read by ranges.
 
 * `serveObject` answers a `HEAD` carrying `Range` with 206, `Content-Range` and
   the span's `Content-Length`; a plain `HEAD` still gets 200.
@@ -99,9 +107,11 @@ After, same scenarios on the same preview:
 
 * `test/db/gate.test.ts`: a ranged `HEAD` answers 206 with the whole length,
   public and gated; a plain `HEAD` still answers 200.
-* `test/e2e/perf.spec.ts`: no Parquet `GET` is answered 200, and a detail
-  opened from its link reads no exceptions index. Run with `E2E_BASE_URL` set,
-  the same specs read the national tree and print the tables above.
+* `test/e2e/perf.spec.ts`: no detail or reference file is ever answered 200 (a
+  whole file); a small département's search fetches its partition exactly
+  once; a detail opened from its link reads no exceptions index. Run with
+  `E2E_BASE_URL` set, the same specs read the national tree and print the
+  tables above.
 
 ## More Information
 
