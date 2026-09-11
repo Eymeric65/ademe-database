@@ -3,13 +3,13 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [dev]
+    branches: [dev, main]
 
-# A superseded push has nothing to say. `main` is never built here: it is only
-# ever reached through a PR from dev, which was already green.
+# A superseded PR run has nothing to say. A push run ends in a deploy, and a
+# deploy is never cut off half-way: the next push waits for it instead.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   node:
@@ -75,3 +75,31 @@ jobs:
           name: playwright-report
           path: playwright-report
           retention-days: 7
+
+  # dev goes to the stable preview host, which every branch preview's Google
+  # sign-in passes through (ADR-0036); main goes to recherche-maison.com. D1
+  # migrations run inside the Worker (server/db.ts), so a deploy is a build and
+  # an upload.
+  deploy:
+    needs: [node, etl, e2e]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # Same pin, same reason as the `node` job above.
+      - run: npm install -g npm@11
+      - run: npm ci
+      - run: npm run build
+      # TRAP: without `--env preview` this deploys the top-level config --
+      # production's D1 and recherche-maison.com -- straight from dev.
+      - if: github.ref == 'refs/heads/dev'
+        run: npx wrangler deploy --env preview
+      - if: github.ref == 'refs/heads/main'
+        run: npx wrangler deploy
