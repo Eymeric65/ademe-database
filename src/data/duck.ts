@@ -253,13 +253,19 @@ export type Building = {
   parcels: Parcel[]
 }
 
-/** Arrow lists and structs, as plain arrays and objects. */
+/**
+ * Arrow lists and structs, as plain arrays and objects.
+ *
+ * TRAP: toJSON, not toArray. A struct row has a toArray too, and it returns
+ * the VALUES -- `{ id, bdg_cover_ratio }` came back as `[id, ratio]`, every
+ * parcel id was undefined, and the building panel failed only where RNB's
+ * plots were read.
+ */
 function plain(value: unknown): unknown {
   if (value == null || typeof value !== 'object') return value
-  const v = value as { toArray?: () => unknown[]; toJSON?: () => unknown }
-  if (typeof v.toArray === 'function') return Array.from(v.toArray(), plain)
-  if (Array.isArray(value)) return value.map(plain)
+  const v = value as { toJSON?: () => unknown }
   const json = typeof v.toJSON === 'function' ? v.toJSON() : value
+  if (Array.isArray(json)) return json.map(plain)
   return Object.fromEntries(Object.entries(json as object).map(([k, x]) => [k, plain(x)]))
 }
 

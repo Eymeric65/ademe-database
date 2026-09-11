@@ -72,9 +72,11 @@ test('a certificate opened by its bare numero is found, and dated by the day', a
 test('a linked certificate shows its building and the parcel under it', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('detail-rnb'))
   await page.goto('/#/existant/09/2109E0005780R')
-  await expect(page.getByText('3MG28QE2BRPX')).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByText('09265000AK0063')).toBeVisible()
-  await expect(page.getByText('667 m²')).toBeVisible()
+  // Inside the panel: the id also appears among the raw facts, as `id_rnb`.
+  const panel = page.locator('.building')
+  await expect(panel.getByText('3MG28QE2BRPX')).toBeVisible({ timeout: 60_000 })
+  await expect(panel.getByText('09265000AK0063')).toBeVisible()
+  await expect(panel.getByText('667 m²')).toBeVisible()
 })
 
 test('an address match says how many buildings it could be', async ({ page }) => {
@@ -86,8 +88,10 @@ test('an address match says how many buildings it could be', async ({ page }) =>
 test('a new-build certificate reaches its building through its own id_rnb', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('detail-neuf'))
   await page.goto('/#/neuf/09/2109N0084499R')
-  await expect(page.getByText('6X7KNTQTK36K')).toBeVisible({ timeout: 60_000 })
-  await expect(page.getByText('09177000ZC0189')).toBeVisible()
+  // The parcel comes from RNB's own plots: no crosswalk for this source yet.
+  const panel = page.locator('.building')
+  await expect(panel.getByText('6X7KNTQTK36K')).toBeVisible({ timeout: 60_000 })
+  await expect(panel.getByText('09177000ZC0189')).toBeVisible({ timeout: 30_000 })
 })
 
 for (const t of [
