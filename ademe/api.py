@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import httpx
 
 from ademe import spec
-from ademe.config import API, API_KEY, PAGE_SIZE
+from ademe.config import API, API_KEY, EXISTANT, PAGE_SIZE, Source
 
 _NEXT = re.compile(r'<([^>]+)>\s*;\s*rel="?next"?', re.I)
 
@@ -68,17 +68,23 @@ def _departement_qs(code: str) -> str:
 
 
 def total(
-    client: httpx.Client, *, departement: str | None = None, qs: str | None = None
+    client: httpx.Client,
+    *,
+    departement: str | None = None,
+    qs: str | None = None,
+    source: Source = EXISTANT,
 ) -> int:
     params: dict = {"size": 0}
     if departement:
         params["qs"] = _departement_qs(departement)
     elif qs:
         params["qs"] = qs
-    return _get(client, f"{API}/lines", params).json()["total"]
+    return _get(client, f"{source.api}/lines", params).json()["total"]
 
 
-def values(client: httpx.Client, field: str, size: int = 1000) -> list[str]:
+def values(
+    client: httpx.Client, field: str, size: int = 1000, *, source: Source = EXISTANT
+) -> list[str]:
     """Distinct values for a field, without scanning rows.
 
     Returns [] for free-text fields: the endpoint declines to enumerate
@@ -86,20 +92,23 @@ def values(client: httpx.Client, field: str, size: int = 1000) -> list[str]:
     vocabularies are told apart from the open dictionaries.
     """
     try:
-        r = _get(client, f"{API}/values/{field}", {"size": size})
+        r = _get(client, f"{source.api}/values/{field}", {"size": size})
         got = r.json()
         return got if isinstance(got, list) else []
     except ApiError:
         return []
 
 
-def page(client: httpx.Client, url: str, params: dict | None = None) -> Page:
+def page(
+    client: httpx.Client, url: str, params: dict | None = None, *, source: Source = EXISTANT
+) -> Page:
     r = _get(client, url, params)
     body = r.content
     text = body.decode("utf-8-sig")
     raw = list(csv.DictReader(io.StringIO(text))) if text.strip() else []
-    # Headers are labels; callers want schema keys.
-    rows = [spec.rename_row(r) for r in raw]
+    # Headers are labels; callers want schema keys. The labels of the dataset
+    # `url` points at -- another source's would swap columns without a sound.
+    rows = [spec.rename_row(r, source) for r in raw]
     m = _NEXT.search(r.headers.get("link", ""))
     return Page(rows=rows, next_url=m.group(1) if m else None, nbytes=len(body))
 
@@ -112,6 +121,7 @@ def iter_pages(
     select: list[str] | None = None,
     start_url: str | None = None,
     page_size: int = PAGE_SIZE,
+    source: Source = EXISTANT,
 ) -> Iterator[Page]:
     """Yield pages of rows. Resume by passing a previously stored `next_url`.
 
@@ -126,7 +136,7 @@ def iter_pages(
     if start_url:
         url, params = start_url, None
     else:
-        url = f"{API}/lines"
+        url = f"{source.api}/lines"
         params = {"size": page_size, "format": "csv", "sort": "_i"}
         if departement:
             params["qs"] = _departement_qs(departement)
@@ -136,7 +146,7 @@ def iter_pages(
             params["select"] = ",".join(select)
 
     while True:
-        p = page(client, url, params)
+        p = page(client, url, params, source=source)
         if not p.rows:
             return
         yield p
