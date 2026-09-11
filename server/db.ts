@@ -71,7 +71,7 @@ export async function getSavedBuilding(
 export async function saveBuilding(
   env: { DB: D1Database },
   caller: Caller,
-  input: { id: string; numeroDpe: string; note?: string | null },
+  input: { id: string; source: string; numeroDpe: string; dept?: string | null; note?: string | null },
 ) {
   const at = Math.floor(Date.now() / 1000)
   return open(env)
@@ -79,14 +79,16 @@ export async function saveBuilding(
     .values({
       id: input.id,
       userId: caller.sub,
+      source: input.source,
       numeroDpe: input.numeroDpe,
+      dept: input.dept ?? null,
       note: input.note ?? null,
       createdAt: at,
       updatedAt: at,
     })
     .onConflictDoUpdate({
-      target: [s.savedBuilding.userId, s.savedBuilding.numeroDpe],
-      set: { note: input.note ?? null, updatedAt: at },
+      target: [s.savedBuilding.userId, s.savedBuilding.source, s.savedBuilding.numeroDpe],
+      set: { note: input.note ?? null, ...(input.dept ? { dept: input.dept } : {}), updatedAt: at },
     })
     .returning()
 }

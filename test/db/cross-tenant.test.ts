@@ -69,6 +69,47 @@ describe('two users and one database', () => {
     ).toHaveLength(1)
   })
 
+  it('keeps one row per source, and B still reaches none of A\'s', async () => {
+    const a = await signUp('src-a@example.test')
+    const b = await signUp('src-b@example.test')
+
+    // The same numero in two trees is two records (ADR-0034).
+    expect((await post(a, '/api/buildings', { numeroDpe: 'X', source: 'existant' })).status).toBe(201)
+    expect((await post(a, '/api/buildings', { numeroDpe: 'X', source: 'neuf', dept: '09' })).status).toBe(201)
+    const rows = await json<{ id: string; source: string; dept: string | null }[]>(
+      await SELF.fetch('http://x/api/buildings', withCookie(a)),
+    )
+    expect(rows.map((r) => r.source).sort()).toEqual(['existant', 'neuf'])
+    const neuf = rows.find((r) => r.source === 'neuf')
+    expect(neuf?.dept).toBe('09')
+
+    // B saving the same record gets B's own row, not A's.
+    const bs = await json<{ id: string }>(
+      await post(b, '/api/buildings', { numeroDpe: 'X', source: 'neuf', dept: '09' }),
+    )
+    expect(rows.map((r) => r.id)).not.toContain(bs.id)
+
+    const del = await SELF.fetch(`http://x/api/buildings/${neuf?.id}`, {
+      method: 'DELETE',
+      headers: { cookie: b },
+    })
+    expect(del.status).toBe(404)
+    expect(
+      await json<unknown[]>(await SELF.fetch('http://x/api/buildings', withCookie(a))),
+    ).toHaveLength(2)
+  })
+
+  it('refuses a source it does not know, and an audit it could not find again', async () => {
+    const a = await signUp('src-bad@example.test')
+    expect((await post(a, '/api/buildings', { numeroDpe: 'X', source: 'bogus' })).status).toBe(400)
+    // An audit step's key names no partition; without one it is unreachable.
+    expect((await post(a, '/api/buildings', { numeroDpe: 'X', source: 'audit' })).status).toBe(400)
+    expect(
+      (await post(a, '/api/buildings', { numeroDpe: 'X', source: 'neuf', dept: '../x' })).status,
+    ).toBe(400)
+    expect(await json(await SELF.fetch('http://x/api/buildings', withCookie(a)))).toEqual([])
+  })
+
   it('never lets B see or delete A\'s saved searches', async () => {
     const a = await signUp('sa@example.test')
     const b = await signUp('sb@example.test')

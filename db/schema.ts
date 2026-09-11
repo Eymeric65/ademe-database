@@ -92,11 +92,17 @@ export const verification = sqliteTable('verification', {
 
 // --- Owned application state ----------------------------------------------
 
+/** The data-plane sources a saved row can point into. src/data/sources.ts repeats it. */
+export const SAVED_SOURCES = ['existant', 'neuf', 'tertiaire', 'audit'] as const
+
 /**
  * A certificate the user kept. `numeroDpe` is a reference into the data plane,
  * deliberately NOT a foreign key: the data plane is a set of files that get
  * rebuilt weekly, and a certificate can be superseded or withdrawn upstream.
  * A dangling reference is a fact about ADEME's data, not a broken row here.
+ *
+ * `numeroDpe` holds the source's own key, which for an audit is `id_etape`,
+ * and `dept` the partition the row was read from. See ADR-0034.
  */
 export const savedBuilding = sqliteTable('saved_building', {
   id: text('id').primaryKey(),
@@ -105,10 +111,13 @@ export const savedBuilding = sqliteTable('saved_building', {
   note: text('note'),
   createdAt: integer('created_at').notNull().default(now),
   updatedAt: integer('updated_at').notNull().default(now),
+  source: text('source').notNull().default('existant'),
+  dept: text('dept'),
 }, (t) => [
-  // One row per certificate per user; saving twice updates the note.
-  uniqueIndex('saved_building_user_dpe_unique').on(t.userId, t.numeroDpe),
+  // One row per record per source per user; saving twice updates the note.
+  uniqueIndex('saved_building_user_source_key_unique').on(t.userId, t.source, t.numeroDpe),
   index('saved_building_user_idx').on(t.userId),
+  check('saved_building_source_known', sql`${t.source} in ('existant', 'neuf', 'tertiaire', 'audit')`),
 ])
 
 /** A filter the user named and kept. `spec` is the serialised QuerySpec. */

@@ -27,6 +27,7 @@ import {
   saveSearch,
   type Caller,
 } from './db'
+import { SAVED_SOURCES } from '../db/schema'
 
 /**
  * `signed-in` asks for a caller and filters on nothing, because the data it
@@ -100,8 +101,26 @@ export const ROUTES: Route[] = [
       const body = await readJson(request)
       const numeroDpe = str(body.numeroDpe)
       if (!numeroDpe) return json({ error: 'numeroDpe is required' }, 400)
+      // A client from before ADR-0034 sends no source: it meant existing housing.
+      const source = body.source == null ? 'existant' : str(body.source)
+      if (!source || !(SAVED_SOURCES as readonly string[]).includes(source)) {
+        return json({ error: 'unknown source' }, 400)
+      }
+      const dept = body.dept == null ? null : str(body.dept)
+      if (dept !== null && !/^(\d{2,3}|2A|2B|DOM|NG)$/.test(dept)) {
+        return json({ error: 'unknown dept' }, 400)
+      }
+      // An audit step's key names no partition and no index maps it to one, so
+      // a saved audit without its partition could never be opened again.
+      if (source === 'audit' && !dept) return json({ error: 'an audit needs its dept' }, 400)
       const note = body.note == null ? null : str(body.note)
-      const rows = await saveBuilding(env, caller, { id: crypto.randomUUID(), numeroDpe, note })
+      const rows = await saveBuilding(env, caller, {
+        id: crypto.randomUUID(),
+        source,
+        numeroDpe,
+        dept,
+        note,
+      })
       return json(rows[0] ?? null, 201)
     },
   },
