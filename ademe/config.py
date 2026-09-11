@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from ademe import mapping as _mapping
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -24,6 +26,9 @@ class Source:
     schema_json: Path  # its labels drive the CSV header rename -- never another's
     db_path: Path  # one file per source; two sources in one file corrupt both
     subdir: str  # tree under v1/; "" is v1/ itself
+    # Where its columns go. Not compared: a source is its name, and a
+    # Mapping holds dicts, which cannot be hashed.
+    mapping: _mapping.Mapping = field(compare=False)
 
     @property
     def api(self) -> str:
@@ -36,6 +41,7 @@ EXISTANT = Source(
     schema_json=REPO / "schema" / "ademe-schema.json",
     db_path=DEFAULT_DB,
     subdir="",
+    mapping=_mapping.EXISTANT,
 )
 SOURCES = {s.slug: s for s in (EXISTANT,)}
 

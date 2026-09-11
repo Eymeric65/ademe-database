@@ -12,15 +12,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ademe import db, ddl, spec
-from ademe.config import API, DATASET, DEFAULT_DB, LICENCE, SCHEMA_JSON
+from ademe.config import DEFAULT_DB, EXISTANT, LICENCE, Source
 
 
-def build(path: Path, *, scales: dict[str, int] | None = None) -> None:
-    cols = spec.load(scales)
+def build(
+    path: Path, *, scales: dict[str, int] | None = None, source: Source = EXISTANT
+) -> None:
+    cols = spec.load(scales, source=source)
     conn = db.connect(path)
     try:
         with db.transaction(conn):
-            for stmt in ddl.all_ddl(cols):
+            for stmt in ddl.all_ddl(cols, source):
                 conn.execute(stmt)
 
             conn.executemany(
@@ -31,10 +33,10 @@ def build(path: Path, *, scales: dict[str, int] | None = None) -> None:
                 "  encoding=excluded.encoding, scale=excluded.scale,"
                 "  domain=excluded.domain, destination=excluded.destination,"
                 "  dest_column=excluded.dest_column",
-                ddl.column_meta_rows(cols),
+                ddl.column_meta_rows(cols, source),
             )
 
-            sha = hashlib.sha256(SCHEMA_JSON.read_bytes()).hexdigest()
+            sha = hashlib.sha256(source.schema_json.read_bytes()).hexdigest()
             conn.execute(
                 "INSERT INTO data_source"
                 " (source_id, dataset, url, licence, schema_sha256, retrieved_at)"
@@ -43,9 +45,9 @@ def build(path: Path, *, scales: dict[str, int] | None = None) -> None:
                 "  schema_sha256=excluded.schema_sha256,"
                 "  retrieved_at=excluded.retrieved_at",
                 (
-                    DATASET,
-                    DATASET,
-                    API,
+                    source.dataset,
+                    source.dataset,
+                    source.api,
                     LICENCE,
                     sha,
                     datetime.now(timezone.utc).isoformat(timespec="seconds"),

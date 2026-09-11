@@ -21,7 +21,7 @@ import argparse
 from pathlib import Path
 
 from ademe import db, ddl
-from ademe.config import DATASET, DEFAULT_DB
+from ademe.config import DEFAULT_DB, EXISTANT, Source
 
 
 class Quarantined(RuntimeError):
@@ -93,7 +93,12 @@ def check_quarantine(conn, allow: int) -> int:
 
 
 def finalise(
-    conn, *, partial: bool = False, quiet: bool = True, allow_bad_rows: int = 0
+    conn,
+    *,
+    partial: bool = False,
+    quiet: bool = True,
+    allow_bad_rows: int = 0,
+    source: Source = EXISTANT,
 ) -> int:
     """Index, verify, analyse. Returns the `dpe` row count."""
     if not partial and (pending := unfinished(conn)):
@@ -112,7 +117,7 @@ def finalise(
     # rather than after an hour of B-tree building.
     check_foreign_keys(conn)
 
-    for stmt in ddl.indexes_ddl():
+    for stmt in ddl.indexes_ddl(source):
         if not quiet:
             print(f"  {stmt}")
         conn.execute(stmt)
@@ -122,7 +127,7 @@ def finalise(
     rows = conn.execute("SELECT COUNT(*) FROM dpe").fetchone()[0]
     conn.execute(
         "UPDATE data_source SET upstream_rows = ? WHERE source_id = ?",
-        (rows, DATASET),
+        (rows, source.dataset),
     )
     conn.commit()
     return rows

@@ -17,19 +17,18 @@ import argparse
 from pathlib import Path
 
 from ademe import api, db, spec
-from ademe.config import DEFAULT_DB
-from ademe.mapping import INTERNAL_COLUMNS
+from ademe.config import DEFAULT_DB, EXISTANT, Source
 
 
-def load_domain(client, columns: list[str]) -> set[str]:
+def load_domain(client, columns: list[str], source: Source = EXISTANT) -> set[str]:
     out: set[str] = set()
     for col in columns:
-        out.update(api.values(client, col))
+        out.update(api.values(client, col, source=source))
     return out
 
 
-def build(path: Path, *, verbose: bool = True) -> dict[str, int]:
-    cols = {k: v for k, v in spec.load().items() if k not in INTERNAL_COLUMNS}
+def build(path: Path, *, verbose: bool = True, source: Source = EXISTANT) -> dict[str, int]:
+    cols = {k: v for k, v in spec.load(source=source).items() if k not in source.mapping.internal}
     domains = spec.vocab_domains(cols)
     client = api.client()
     conn = db.connect(path)
@@ -37,7 +36,7 @@ def build(path: Path, *, verbose: bool = True) -> dict[str, int]:
     try:
         for domain in sorted(domains):
             members = domains[domain]
-            vals = load_domain(client, members)
+            vals = load_domain(client, members, source)
             if vals:
                 with db.transaction(conn):
                     conn.executemany(

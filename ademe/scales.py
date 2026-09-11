@@ -24,7 +24,7 @@ from pathlib import Path
 import httpx
 
 from ademe import api, db, spec
-from ademe.config import API, DEFAULT_DB
+from ademe.config import DEFAULT_DB, EXISTANT, Source
 
 # The Lambert-93 coordinates carry up to 6 decimals (x*10^6 is ~1e12, well
 # inside int64). Past this a column is stored as TEXT -- scale 0 is the
@@ -51,17 +51,22 @@ def decimals(raw: str) -> int | None:
 
 
 def discover(
-    client: httpx.Client, numeric: list[str], *, sample: int, page_size: int
+    client: httpx.Client,
+    numeric: list[str],
+    *,
+    sample: int,
+    page_size: int,
+    source: Source = EXISTANT,
 ) -> tuple[dict[str, int], dict[str, int], int]:
     """Return (scale per column, non-numeric hits per column, rows seen)."""
     maxdec: dict[str, int] = {c: 0 for c in numeric}
     bad: dict[str, int] = {}
     seen = 0
 
-    url = f"{API}/lines"
+    url = f"{source.api}/lines"
     params = {"size": page_size, "format": "csv", "sort": "_rand"}
     while seen < sample:
-        p = api.page(client, url, params)
+        p = api.page(client, url, params, source=source)
         if not p.rows:
             break
         for row in p.rows:

@@ -13,7 +13,8 @@ the guard that makes "lossless" checkable rather than aspirational.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable
+from dataclasses import dataclass, field, replace
 
 
 @dataclass(frozen=True)
@@ -203,7 +204,71 @@ class Coverage:
         )
 
 
-def classify(source_columns: list[str]) -> Coverage:
+def _repeat_without(rep: Repeat, absent: set[str]) -> Repeat | None:
+    slots = rep.slots()
+    gone = [s for s in slots if set(s["src_to_dst"]) <= absent]
+    kept = [s for s in slots if s not in gone]
+    if not kept:
+        return None
+    outer = tuple(sorted({s["outer"] for s in kept}))
+    inner = tuple(sorted({s["inner"] for s in kept})) if rep.inner else None
+    if len(kept) != len(outer) * len(inner or (None,)):
+        raise ValueError(
+            f"{rep.table}: dropping slot(s) {[(s['outer'], s['inner']) for s in gone]}"
+            " leaves no outer x inner grid"
+        )
+    columns = {}
+    for template, dst in rep.columns.items():
+        names = [template.format(i=s["outer"], g=s["inner"]) for s in kept]
+        missing = [n for n in names if n in absent]
+        if not missing:
+            columns[template] = dst
+        elif len(missing) != len(names):
+            raise ValueError(f"{rep.table}: {missing[0]} is absent from some slots but not others")
+    return replace(rep, columns=columns, outer=outer, inner=inner)
+
+
+@dataclass(frozen=True, eq=False)
+class Mapping:
+    """Where one dataset's columns go: its repeating groups, and the columns
+    deduplicated into `commune`, `adresse` and `dpe_adresse_brut`. Everything
+    else lands on `dpe`. See ADR-0017."""
+
+    repeats: tuple[Repeat, ...]
+    commune: dict[str, str]
+    adresse: dict[str, str]
+    adresse_brut: dict[str, str]
+    internal: frozenset[str] = frozenset(INTERNAL_COLUMNS)
+
+    def without(self, absent: Iterable[str]) -> Mapping:
+        """This structure, for a dataset that lacks the columns in `absent`.
+
+        Strict, because a child table is built from its first slot
+        (`ddl.repeat_ddl`): a column may go only if every slot lacks it, and a
+        slot only if all its columns are gone and the slots left still form an
+        outer x inner grid. Anything else raises rather than building a table
+        that cannot hold the data. Names this structure does not claim are
+        top-level `dpe` columns, which need no declaring.
+        """
+        absent = set(absent)
+        return replace(
+            self,
+            repeats=tuple(r for r in (_repeat_without(r, absent) for r in self.repeats) if r),
+            commune={s: d for s, d in self.commune.items() if s not in absent},
+            adresse={s: d for s, d in self.adresse.items() if s not in absent},
+            adresse_brut={s: d for s, d in self.adresse_brut.items() if s not in absent},
+        )
+
+
+EXISTANT = Mapping(
+    repeats=REPEATS,
+    commune=COMMUNE_COLUMNS,
+    adresse=ADRESSE_COLUMNS,
+    adresse_brut=ADRESSE_BRUT_COLUMNS,
+)
+
+
+def classify(source_columns: list[str], mapping: Mapping = EXISTANT) -> Coverage:
     """Assign every source column to exactly one destination."""
     cov = Coverage()
     claimed: dict[str, str] = {}
@@ -213,24 +278,24 @@ def classify(source_columns: list[str]) -> Coverage:
             raise ValueError(f"{col!r} claimed by both {claimed[col]} and {where}")
         claimed[col] = where
 
-    for rep in REPEATS:
+    for rep in mapping.repeats:
         cols = sorted(rep.source_columns())
         cov.repeats[rep.table] = cols
         for c in cols:
             claim(c, rep.table)
 
-    for src in COMMUNE_COLUMNS:
+    for src in mapping.commune:
         cov.commune.append(src)
         claim(src, "commune")
-    for src in ADRESSE_COLUMNS:
+    for src in mapping.adresse:
         cov.adresse.append(src)
         claim(src, "adresse")
-    for src in ADRESSE_BRUT_COLUMNS:
+    for src in mapping.adresse_brut:
         cov.adresse_brut.append(src)
         claim(src, "dpe_adresse_brut")
 
     for col in source_columns:
-        if col in INTERNAL_COLUMNS:
+        if col in mapping.internal:
             cov.internal.append(col)
             claim(col, "internal")
         elif col not in claimed:
@@ -246,8 +311,8 @@ def classify(source_columns: list[str]) -> Coverage:
     return cov
 
 
-def check_coverage(source_columns: list[str]) -> Coverage:
-    cov = classify(source_columns)
+def check_coverage(source_columns: list[str], mapping: Mapping = EXISTANT) -> Coverage:
+    cov = classify(source_columns, mapping)
     if cov.total() != len(source_columns):
         raise ValueError(f"covered {cov.total()} of {len(source_columns)} columns")
     return cov
