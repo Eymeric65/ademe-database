@@ -732,6 +732,11 @@ h1 {
 }
 
 .results-map {
+  /* TRAP: Leaflet's layers are absolutely positioned. Leaflet makes a static
+     container relative once, when the map is created, so a map created sticky
+     and then made static by the breakpoint would lose it: its tiles would lay
+     out against <main> and paint over the form, unclipped. */
+  position: relative;
   height: 18rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius);

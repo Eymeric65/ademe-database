@@ -28,7 +28,7 @@ export function ResultsMap({ hits }: { hits: Hit[] }) {
   useEffect(() => {
     const el = container.current
     if (!el) return
-    const m = L.map(el, { scrollWheelZoom: false }).setView([46.6, 2.4], 5)
+    const m = L.map(el).setView([46.6, 2.4], 5)
     L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(m)
     const group = L.featureGroup().addTo(m)
     map.current = m

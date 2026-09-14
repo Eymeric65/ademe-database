@@ -95,23 +95,45 @@ const PIXEL = Buffer.from(
   'base64',
 )
 
-/** TARGET on its exact day of issue. */
-async function searchTarget(page: Page): Promise<{ tiles: number }> {
+/**
+ * TARGET on its exact day of issue -- or, `wide`, every class-E certificate in
+ * its postcode, enough markers to spread across the map.
+ */
+async function searchTarget(page: Page, { wide = false } = {}): Promise<{ tiles: number; zoom: number }> {
   // Tiles are a third party's bytes: the suite must neither depend on IGN
   // being up nor spend its fair use. The markers are SVG and need no tile.
-  const served = { tiles: 0 }
+  const served = { tiles: 0, zoom: 0 }
   await page.route(/^https:\/\/data\.geopf\.fr\/wmts/, (route) => {
     served.tiles++
+    const z = Number(new URL(route.request().url()).searchParams.get('TILEMATRIX'))
+    served.zoom = Math.max(served.zoom, z)
     return route.fulfill({ contentType: 'image/png', body: PIXEL })
   })
   await page.goto('/')
   await page.getByLabel('Code postal').fill(TARGET.codePostal)
   await page.getByLabel('Classe énergie').selectOption(TARGET.classe)
-  await page.getByLabel('Du', { exact: true }).fill('2021-08-03')
-  await page.getByLabel('Au', { exact: true }).fill('2021-08-03')
+  if (!wide) {
+    await page.getByLabel('Du', { exact: true }).fill('2021-08-03')
+    await page.getByLabel('Au', { exact: true }).fill('2021-08-03')
+  }
   await page.getByRole('button', { name: 'Rechercher' }).click()
   await expect(page.getByRole('link', { name: TARGET.address })).toBeVisible({ timeout: 60_000 })
   return served
+}
+
+/** How many markers are drawn inside the map's own box. */
+async function markersInView(page: Page): Promise<[inside: number, total: number]> {
+  return page.evaluate(() => {
+    const box = document.querySelector('.results-map')!.getBoundingClientRect()
+    const centres = [...document.querySelectorAll('.results-map path.leaflet-interactive')].map((p) => {
+      const b = p.getBoundingClientRect()
+      return [b.x + b.width / 2, b.y + b.height / 2] as const
+    })
+    const inside = centres.filter(
+      ([x, y]) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom,
+    )
+    return [inside.length, centres.length] as [number, number]
+  })
 }
 
 test('the results are on a map, one marker each, opening the record', async ({ page }) => {
@@ -169,6 +191,47 @@ test('the map sits beside the list on a desktop and above it on a phone', async 
   h = (await hit.boundingBox())!
   expect(m.y + m.height).toBeLessThanOrEqual(h.y)
   expect(m.height).toBeGreaterThan(200)
+})
+
+test('a map resized across the breakpoint keeps its tiles and markers inside it', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-resize'))
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await searchTarget(page, { wide: true })
+  await expect.poll(() => markersInView(page)).toEqual([17, 17])
+
+  for (const width of [768, 390, 1280]) {
+    await page.setViewportSize({ width, height: 900 })
+    // TRAP: the map's layers are absolutely positioned. Were the map to lose
+    // its positioning -- sticky on a desktop, static below the breakpoint --
+    // they would lay out against <main> and paint over the search form,
+    // unclipped, leaving the map itself empty.
+    const pane = await page.evaluate(
+      () => (document.querySelector('.results-map .leaflet-map-pane') as HTMLElement).offsetParent?.className ?? '',
+    )
+    expect(pane, `at ${width}px`).toContain('results-map')
+    await expect.poll(() => markersInView(page), { message: `at ${width}px` }).toEqual([17, 17])
+  }
+})
+
+test('the wheel over the map zooms it rather than scrolling the page', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-wheel'))
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const served = await searchTarget(page)
+
+  const map = page.locator('.results-map')
+  await map.scrollIntoViewIfNeeded()
+  await expect.poll(() => served.zoom).toBeGreaterThan(0)
+  const zoom = served.zoom
+  const scrolled = await page.evaluate(() => window.scrollY)
+  // Upward, so a page that did take the wheel always has somewhere to go.
+  expect(scrolled).toBeGreaterThan(0)
+
+  const box = (await map.boundingBox())!
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.wheel(0, -400)
+
+  await expect.poll(() => served.zoom).toBeGreaterThan(zoom)
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled)
 })
 
 test('the exact day of the diagnostic finds it', async ({ page }) => {
