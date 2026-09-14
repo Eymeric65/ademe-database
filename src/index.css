@@ -198,6 +198,7 @@ h2 {
 .fact dt,
 .hit-meta,
 .hit-map,
+.back,
 .badge {
   font-family: var(--font-mono);
 }
@@ -695,7 +696,8 @@ h1 {
   color: var(--color-muted);
 }
 
-.hit-map {
+.hit-map,
+.back {
   display: inline-block;
   margin-top: 0.35rem;
   font-size: 0.72rem;
@@ -707,8 +709,59 @@ h1 {
   text-underline-offset: 3px;
 }
 
-.hit-map:hover {
+.hit-map:hover,
+.back:hover {
   text-decoration-color: currentColor;
+}
+
+.back {
+  margin: 0 0 1.25rem;
+}
+
+/* --- the results map ---------------------------------------------------- */
+
+/*
+ * Above the list on a phone -- the map comes first in the DOM -- and beside it
+ * once there is room for two columns, where it stays in view while the list
+ * scrolls.
+ */
+.results {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1.25rem;
+}
+
+.results-map {
+  /* TRAP: Leaflet's layers are absolutely positioned. Leaflet makes a static
+     container relative once, when the map is created, so a map created sticky
+     and then made static by the breakpoint would lose it: its tiles would lay
+     out against <main> and paint over the form, unclipped. */
+  position: relative;
+  height: 18rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  /* Leaflet's panes carry z-indexes up to 1000; keep them under the masthead. */
+  isolation: isolate;
+}
+
+/* The basemap in grey, so the only colour on the map is the DPE class. */
+.results-map .leaflet-tile-pane {
+  filter: grayscale(1) contrast(0.9) brightness(1.04);
+}
+
+@media (min-width: 62rem) {
+  .results {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .results-map {
+    order: 2;
+    position: sticky;
+    /* Clear of the sticky masthead, which would otherwise cover its top. */
+    top: 5rem;
+    height: calc(100vh - 6rem);
+  }
 }
 
 /*
