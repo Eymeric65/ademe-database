@@ -1,0 +1,32 @@
+{
+  "version": "v1",
+  "source": "rnb",
+  "built_at": "2026-09-10T20:59:41+00:00",
+  "licence": "Licence Ouverte 2.0 (Etalab)",
+  "origin": "https://rnb-opendata.s3.fr-par.scw.cloud/files/RNB_{code}.csv.zip",
+  "columns": [
+    "rnb_id",
+    "status",
+    "point",
+    "ext_ids",
+    "addresses",
+    "plots"
+  ],
+  "dropped": [
+    "shape",
+    "validated_by"
+  ],
+  "partitions": [
+    {
+      "dept": "09",
+      "rows": 450,
+      "sha256": "8599287fc1d6f7653f0d1cf02261fcd49a7ab7474f3d4e5f35783b1f2ae34a0e"
+    },
+    {
+      "dept": "48",
+      "rows": 355,
+      "sha256": "a398aa1635ee92e769ebcdc5a5991f172d0df2b83cdb9eadb5609fe311b8cf9b"
+    }
+  ],
+  "sliced_from": "2026-09-10T20:59:41+00:00"
+}

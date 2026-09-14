@@ -90,3 +90,64 @@ describe('the AUTH_TEST_CREDENTIALS switch, in its OFF position', () => {
     expect(res.status).toBeLessThan(400)
   })
 })
+
+describe('Google on a preview, through the stable preview host', () => {
+  /**
+   * Google refuses any redirect URI it was not told about, and every branch
+   * preview has a host of its own. So a branch asks Google to come back to the
+   * ONE registered preview host, which hands the profile back encrypted.
+   * See ADR-0036. Through `authFor` for the same reason as the switch above.
+   */
+  const STABLE = 'https://stable-preview.example'
+  const BRANCH = 'https://some-branch-preview.example'
+  const google = { GOOGLE_CLIENT_ID: 'client-id', GOOGLE_CLIENT_SECRET: 'client-secret' }
+
+  function preview(): Env {
+    return { ...env, ...google, BETTER_AUTH_URL: '', OAUTH_PROXY_URL: STABLE } as unknown as Env
+  }
+
+  async function redirectURI(e: Env, origin: string): Promise<string | null> {
+    const res = await authFor(e, origin).handler(
+      new Request(`${origin}/api/auth/sign-in/social`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({ provider: 'google', callbackURL: `${origin}/` }),
+      }),
+    )
+    expect(res.status).toBe(200)
+    const { url } = (await res.json()) as { url: string }
+    return new URL(url).searchParams.get('redirect_uri')
+  }
+
+  it('asks Google for the stable host callback from a branch host', async () => {
+    expect(await redirectURI(preview(), BRANCH)).toBe(`${STABLE}/api/auth/callback/google`)
+  })
+
+  it('lets the stable host sign in for itself, without a proxy', async () => {
+    expect(await redirectURI(preview(), STABLE)).toBe(`${STABLE}/api/auth/callback/google`)
+  })
+
+  it('leaves production on its own pinned callback', async () => {
+    const production = {
+      ...env,
+      ...google,
+      BETTER_AUTH_URL: 'https://recherche-maison.com',
+      OAUTH_PROXY_URL: undefined,
+      AUTH_TEST_CREDENTIALS: undefined,
+    } as unknown as Env
+    expect(await redirectURI(production, 'https://recherche-maison.com')).toBe(
+      'https://recherche-maison.com/api/auth/callback/google',
+    )
+  })
+
+  it('refuses a forged hand-back and sets no session', async () => {
+    const res = await authFor(preview(), BRANCH).handler(
+      new Request(
+        `${BRANCH}/api/auth/oauth-proxy-callback?callbackURL=${encodeURIComponent(`${BRANCH}/`)}&profile=forged`,
+      ),
+    )
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toMatch(/error/)
+    expect(res.headers.get('set-cookie') ?? '').not.toMatch(/session_token/)
+  })
+})

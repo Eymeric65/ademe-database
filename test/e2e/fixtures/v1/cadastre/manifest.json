@@ -1,0 +1,31 @@
+{
+  "version": "v1",
+  "source": "cadastre",
+  "built_at": "2026-09-10T21:11:11+00:00",
+  "licence": "Licence Ouverte 2.0 (Etalab)",
+  "origin": "https://cadastre.data.gouv.fr/data/etalab-cadastre/latest/geojson/departements/{code}/cadastre-{code}-parcelles.json.gz",
+  "columns": [
+    "id",
+    "commune",
+    "prefixe",
+    "section",
+    "numero",
+    "contenance",
+    "arpente",
+    "created",
+    "updated"
+  ],
+  "partitions": [
+    {
+      "dept": "09",
+      "rows": 709,
+      "sha256": "ea646562ec73fe6b629f7ab859969ae29e3624e82729f3e34b91d1d2f28c2a80"
+    },
+    {
+      "dept": "48",
+      "rows": 605,
+      "sha256": "ca8e0fe8c8e3a4805c754003219a04991075a5abe377cfcbbc6cc879f2f0152c"
+    }
+  ],
+  "sliced_from": "2026-09-10T21:11:11+00:00"
+}

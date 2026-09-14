@@ -38,8 +38,95 @@ test('the detail view shows a column only the wide file has', async ({ page }) =
   // conso_5_usages_ef is NOT in the 17-column search index. Seeing it is the
   // proof the detail read went to the wide file rather than reusing the row
   // already in memory -- which would look identical for every other field.
-  await expect(page.getByText('conso_5_usages_ef', { exact: false }).first()).toBeVisible()
+  const fact = page.locator('.fact[data-key="conso_5_usages_ef"]')
+  await expect(fact).toBeVisible()
+  // Named in French, in a unit, and able to say what it is for.
+  await expect(fact.locator('dt')).toContainText('Consommation totale')
+  await expect(fact.locator('dd').first()).toHaveText(/Wh\/an$/)
+  await fact.getByRole('button', { name: 'Explication' }).click()
+  await expect(fact.getByText(/cinq usages/)).toBeVisible()
 })
+
+test('the detail view shows no column the file path invented', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-dept'))
+  await findTarget(page)
+  await page.getByRole('link', { name: TARGET.address }).click()
+
+  // The wide file's own column first, so the count below runs on a loaded
+  // detail and not on an empty page, where it would pass for nothing.
+  await expect(page.locator('.fact[data-key="conso_5_usages_ef"]')).toBeVisible({
+    timeout: 30_000,
+  })
+  // `dept` is not a column of the wide file. DuckDB derives it from the
+  // `dept=09/` in the path unless told not to, and the detail lists every key.
+  await expect(page.locator('.fact[data-key="dept"]')).toHaveCount(0)
+})
+
+test('a certificate opened by its bare numero is found, and dated by the day', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-legacy'))
+  // The first links and every row saved before sources carry no partition,
+  // and this numero's own digits say '07', not '09': the exceptions index.
+  await page.goto(`/#/dpe/${TARGET.numero}`)
+  await expect(page.getByRole('heading', { name: TARGET.address })).toBeVisible({
+    timeout: 60_000,
+  })
+  await expect(page.getByText('03/08/2021').first()).toBeVisible()
+  // No id_rnb, and the crosswalk has no row for it.
+  await expect(page.getByText(/Aucun bâtiment/)).toBeVisible({ timeout: 30_000 })
+})
+
+test('a linked certificate shows its building and the parcel under it', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-rnb'))
+  await page.goto('/#/existant/09/2109E0005780R')
+  // Inside the panel: the id also appears among the raw facts, as `id_rnb`.
+  const panel = page.locator('.building')
+  await expect(panel.getByText('3MG28QE2BRPX')).toBeVisible({ timeout: 60_000 })
+  await expect(panel.getByText('09265000AK0063')).toBeVisible()
+  await expect(panel.getByText('667 m²')).toBeVisible()
+})
+
+test('an apport ADEME published in Wh is not shown a thousand times too big', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-wh'))
+  await page.goto('/#/existant/09/2109E0005780R')
+  // 1 980 000 for a 77 m² house: Wh, whatever ADEME's documentation says.
+  await expect(page.locator('.fact[data-key="apport_interne_saison_chauffe"] dd').first()).toHaveText(
+    '1,98 MWh/an',
+    { timeout: 60_000 },
+  )
+})
+
+test('an address match says how many buildings it could be', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-ban'))
+  await page.goto('/#/existant/09/2100E0188987T')
+  await expect(page.getByText(/3 bâtiments possibles/).first()).toBeVisible({ timeout: 60_000 })
+})
+
+test('a new-build certificate reaches its building through its own id_rnb', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('detail-neuf'))
+  await page.goto('/#/neuf/09/2109N0084499R')
+  // The parcel comes from RNB's own plots: no crosswalk for this source yet.
+  const panel = page.locator('.building')
+  await expect(panel.getByText('6X7KNTQTK36K')).toBeVisible({ timeout: 60_000 })
+  await expect(panel.getByText('09177000ZC0189')).toBeVisible({ timeout: 30_000 })
+})
+
+for (const t of [
+  { source: 'neuf', key: '2109N0084499R', address: /Madière/ },
+  // An audit step's key is a UUID: only the saved partition finds it again.
+  { source: 'audit', key: 'abacf936-8b57-46a1-b920-fc072cb29e7e', address: /Rue du Barry/ },
+]) {
+  test(`a saved ${t.source} record reopens in its own tree`, async ({ page }) => {
+    await signUpViaApi(page, uniqueEmail(`save-${t.source}`))
+    await page.goto(`/#/${t.source}/09/${t.key}`)
+    await page.getByRole('button', { name: 'Enregistrer' }).click({ timeout: 60_000 })
+    await expect(page.getByRole('button', { name: 'Retirer' })).toBeVisible()
+
+    await page.getByRole('link', { name: 'Enregistrés' }).click()
+    await page.getByRole('link', { name: t.key }).click()
+    await expect(page).toHaveURL(new RegExp(`#/${t.source}/09/${t.key}$`))
+    await expect(page.getByRole('heading', { name: t.address })).toBeVisible({ timeout: 60_000 })
+  })
+}
 
 test('a signed-in user saves a certificate and finds it again', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('save'))

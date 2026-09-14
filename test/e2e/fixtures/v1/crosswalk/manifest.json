@@ -1,0 +1,46 @@
+{
+  "version": "v1",
+  "source": "crosswalk",
+  "built_at": "2026-09-11T04:23:45+00:00",
+  "methods": [
+    "id_rnb",
+    "ban",
+    "unresolved"
+  ],
+  "columns": [
+    "source",
+    "record_key",
+    "rnb_id",
+    "match_method",
+    "parcel_id",
+    "bdg_cover_ratio",
+    "ban_candidates"
+  ],
+  "inputs": {
+    "existant": {
+      "built_at": "2026-09-11T04:15:59+00:00",
+      "sha256": "23762fd45289432c1945b2d57d5eedd815d45974b544ae2e293554a551c03b0e"
+    },
+    "rnb": {
+      "built_at": "2026-09-10T20:59:41+00:00",
+      "sha256": "e594d320aeb9f05873a627e6e9e6eac8ff9064a830ae0bf571aa162966849e5f"
+    },
+    "cadastre": {
+      "built_at": "2026-09-10T21:11:11+00:00",
+      "sha256": "fc8bd23776ce8cdcff085c0fa51d34d4c25d4c2fd61fdcf1a42727e56fc90327"
+    }
+  },
+  "partitions": [
+    {
+      "dept": "09",
+      "rows": 781,
+      "sha256": "976d3a6860c6ec178de529dcb1e97a791b1c693d7d2144a29c5e4a03c286b9c3"
+    },
+    {
+      "dept": "48",
+      "rows": 641,
+      "sha256": "aa92cb8c606ac145080f43356cd4ea9093364cdd9033ccae319c031c2b986a97"
+    }
+  ],
+  "sliced_from": "2026-09-11T04:23:45+00:00"
+}

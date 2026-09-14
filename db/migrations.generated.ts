@@ -29,5 +29,14 @@ export const MIGRATIONS: readonly Migration[] = [
     "statements": [
       "ALTER TABLE `account` ADD `issuer` text;"
     ]
+  },
+  {
+    "name": "0002_saved_building_source",
+    "statements": [
+      "ALTER TABLE `saved_building` ADD `source` text DEFAULT 'existant' NOT NULL CHECK (`source` in ('existant', 'neuf', 'tertiaire', 'audit'));",
+      "ALTER TABLE `saved_building` ADD `dept` text;",
+      "DROP INDEX IF EXISTS `saved_building_user_dpe_unique`;",
+      "CREATE UNIQUE INDEX IF NOT EXISTS `saved_building_user_source_key_unique` ON `saved_building` (`user_id`,`source`,`numero_dpe`);"
+    ]
   }
 ] as const

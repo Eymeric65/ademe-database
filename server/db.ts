@@ -21,6 +21,7 @@
 
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { oAuthProxy } from 'better-auth/plugins'
 import { and, desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { migrate } from '../db/migrate'
@@ -71,7 +72,7 @@ export async function getSavedBuilding(
 export async function saveBuilding(
   env: { DB: D1Database },
   caller: Caller,
-  input: { id: string; numeroDpe: string; note?: string | null },
+  input: { id: string; source: string; numeroDpe: string; dept?: string | null; note?: string | null },
 ) {
   const at = Math.floor(Date.now() / 1000)
   return open(env)
@@ -79,14 +80,16 @@ export async function saveBuilding(
     .values({
       id: input.id,
       userId: caller.sub,
+      source: input.source,
       numeroDpe: input.numeroDpe,
+      dept: input.dept ?? null,
       note: input.note ?? null,
       createdAt: at,
       updatedAt: at,
     })
     .onConflictDoUpdate({
-      target: [s.savedBuilding.userId, s.savedBuilding.numeroDpe],
-      set: { note: input.note ?? null, updatedAt: at },
+      target: [s.savedBuilding.userId, s.savedBuilding.source, s.savedBuilding.numeroDpe],
+      set: { note: input.note ?? null, ...(input.dept ? { dept: input.dept } : {}), updatedAt: at },
     })
     .returning()
 }
@@ -196,5 +199,9 @@ export function authFor(env: Env, origin?: string) {
     // other's rows -- a Google round-trip cannot be automated. Enabling it in
     // production would add a password surface nobody intended to run.
     emailAndPassword: { enabled: env.AUTH_TEST_CREDENTIALS === '1' },
+    // TRAP: OAUTH_PROXY_URL is preview-only, like AUTH_TEST_CREDENTIALS. Set in
+    // production, it would send every Google sign-in to a preview host and its
+    // preview database. See ADR-0036.
+    plugins: env.OAUTH_PROXY_URL ? [oAuthProxy({ productionURL: env.OAUTH_PROXY_URL })] : [],
   })
 }
