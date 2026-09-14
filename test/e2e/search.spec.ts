@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { signUpViaApi, uniqueEmail } from './helpers'
 
 /**
@@ -65,7 +65,7 @@ test('one letter of difference excludes it', async ({ page }) => {
   await expect(page.getByText(TARGET.address)).toHaveCount(0)
 })
 
-test('a result links to the map at real coordinates', async ({ page }) => {
+test('a result links to Google Maps at real coordinates', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('search-map'))
   await page.goto('/')
 
@@ -74,19 +74,101 @@ test('a result links to the map at real coordinates', async ({ page }) => {
   await page.getByLabel('Surface (m²)').fill(TARGET.surface)
   await page.getByRole('button', { name: 'Rechercher' }).click()
 
-  const map = page.getByRole('link', { name: 'Voir sur la carte' }).first()
+  const map = page.getByRole('link', { name: 'Voir sur Google Maps' }).first()
   await expect(map).toBeVisible({ timeout: 60_000 })
 
   // 42.9N 1.6E is Ariège. Asserting the actual place, not merely that a link
   // exists: ADEME's own coordinates put overseas certificates in Norway, and a
   // link to Norway is still a link (ADR-0011).
-  const href = await map.getAttribute('href')
-  const lat = Number(new URL(href!).searchParams.get('mlat'))
-  const lon = Number(new URL(href!).searchParams.get('mlon'))
+  const url = new URL((await map.getAttribute('href'))!)
+  expect(url.host).toBe('www.google.com')
+  const [lat, lon] = (url.searchParams.get('query') ?? '').split(',').map(Number)
   expect(lat).toBeGreaterThan(42.5)
   expect(lat).toBeLessThan(43.5)
   expect(lon).toBeGreaterThan(1)
   expect(lon).toBeLessThan(2.5)
+})
+
+// A transparent 1×1 PNG, served in place of every map tile.
+const PIXEL = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+)
+
+/** TARGET on its exact day of issue. */
+async function searchTarget(page: Page): Promise<{ tiles: number }> {
+  // Tiles are a third party's bytes: the suite must neither depend on IGN
+  // being up nor spend its fair use. The markers are SVG and need no tile.
+  const served = { tiles: 0 }
+  await page.route(/^https:\/\/data\.geopf\.fr\/wmts/, (route) => {
+    served.tiles++
+    return route.fulfill({ contentType: 'image/png', body: PIXEL })
+  })
+  await page.goto('/')
+  await page.getByLabel('Code postal').fill(TARGET.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(TARGET.classe)
+  await page.getByLabel('Du', { exact: true }).fill('2021-08-03')
+  await page.getByLabel('Au', { exact: true }).fill('2021-08-03')
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+  await expect(page.getByRole('link', { name: TARGET.address })).toBeVisible({ timeout: 60_000 })
+  return served
+}
+
+test('the results are on a map, one marker each, opening the record', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-leaflet'))
+  const served = await searchTarget(page)
+
+  await expect(page.locator('.results-map.leaflet-container')).toBeVisible()
+  // The basemap is asked of the provider the stub stands in for. Were the tile
+  // URL to drift, the stub would match nothing and CI would reach the network.
+  await expect.poll(() => served.tiles).toBeGreaterThan(0)
+  const links = await page.getByRole('link', { name: 'Voir sur Google Maps' }).count()
+  expect(links).toBeGreaterThan(0)
+  const markers = page.locator('.results-map path.leaflet-interactive')
+  await expect(markers).toHaveCount(links)
+
+  await markers.first().click()
+  const popup = page.locator('.leaflet-popup-content a')
+  await expect(popup).toContainText(TARGET.address)
+  await expect(popup).toHaveAttribute('href', `#/existant/09/${TARGET.numero}`)
+})
+
+test('back to the search keeps the form and the results', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-back'))
+  await searchTarget(page)
+
+  await page.getByRole('link', { name: TARGET.address }).click()
+  await expect(page.getByRole('heading', { name: TARGET.address })).toBeVisible({ timeout: 30_000 })
+  // The form's own input: the detail page has a "Code postal" field too.
+  const cp = page.locator('form.search #cp')
+  await expect(cp).toBeHidden()
+
+  await page.getByRole('link', { name: 'Retour à la recherche' }).click()
+  // A remounted search shows an empty form: what was typed is the proof the
+  // results were kept rather than fetched again.
+  await expect(cp).toHaveValue(TARGET.codePostal)
+  await expect(page.getByRole('link', { name: TARGET.address })).toBeVisible({ timeout: 2_000 })
+  await expect(page.locator('.results-map path.leaflet-interactive').first()).toBeVisible()
+})
+
+test('the map sits beside the list on a desktop and above it on a phone', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('search-layout'))
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await searchTarget(page)
+
+  const map = page.locator('.results-map')
+  const hit = page.locator('.hit').first()
+  await expect(map).toBeVisible()
+  let m = (await map.boundingBox())!
+  let h = (await hit.boundingBox())!
+  expect(m.x).toBeGreaterThanOrEqual(h.x + h.width)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect.poll(async () => (await map.boundingBox())?.width ?? 0).toBeLessThan(390)
+  m = (await map.boundingBox())!
+  h = (await hit.boundingBox())!
+  expect(m.y + m.height).toBeLessThanOrEqual(h.y)
+  expect(m.height).toBeGreaterThan(200)
 })
 
 test('the exact day of the diagnostic finds it', async ({ page }) => {

@@ -3,7 +3,7 @@ import { api } from '../api'
 import { buildings, detail, type Building, type Record_ } from '../data/duck'
 import { formatDate, SOURCE, type Source } from '../data/sources'
 import type { DetailRef } from '../routes'
-import { area, Badge } from '../search/Results'
+import { area, Badge, mapsHref } from '../search/Results'
 import { field, formatValue } from './fields'
 
 type Saved = { id: string; numeroDpe: string; source?: string }
@@ -71,9 +71,17 @@ export function Detail({ record }: { record: DetailRef }) {
       .catch(() => setSaved(null))
   }, [record])
 
-  if (error) return <p className="error">Les données sont indisponibles : {error}</p>
-  if (rec === undefined) return <p className="lede">Chargement…</p>
-  if (rec === null) return <p className="lede">Introuvable dans {src.label.toLowerCase()}.</p>
+  // A plain link: the search stays mounted behind this page, so going to #/
+  // finds its form and results as they were, wherever this page was opened from.
+  const back = (
+    <a className="back" href="#/">
+      ← Retour à la recherche
+    </a>
+  )
+
+  if (error) return <>{back}<p className="error">Les données sont indisponibles : {error}</p></>
+  if (rec === undefined) return <>{back}<p className="lede">Chargement…</p></>
+  if (rec === null) return <>{back}<p className="lede">Introuvable dans {src.label.toLowerCase()}.</p></>
 
   const row = rec.row
   const address = render(row.adresse_ban) || record.key
@@ -135,6 +143,7 @@ export function Detail({ record }: { record: DetailRef }) {
 
   return (
     <section>
+      {back}
       <p className="eyebrow">{src.label}</p>
       <h1>{address}</h1>
       <p className="lede">{record.key}</p>
@@ -252,11 +261,11 @@ function Buildings({ src, record, rec }: { src: Source; record: DetailRef; rec: 
               {b.point ? (
                 <a
                   className="hit-map"
-                  href={`https://www.openstreetmap.org/?mlat=${b.point.lat}&mlon=${b.point.lon}#map=19/${b.point.lat}/${b.point.lon}`}
+                  href={mapsHref(b.point.lat, b.point.lon)}
                   target="_blank"
                   rel="noreferrer noopener"
                 >
-                  Le bâtiment sur la carte
+                  Le bâtiment sur Google Maps
                 </a>
               ) : null}
               {b.parcels.length ? (

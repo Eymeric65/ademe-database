@@ -1,6 +1,6 @@
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useSession } from './auth'
-import { useRoute } from './routes'
+import { parse, useRoute } from './routes'
 import { search, type Hit } from './data/duck'
 import { Detail } from './detail/Detail'
 import { Saved } from './saved/Saved'
@@ -42,6 +42,29 @@ function Search() {
       <Results hits={hits} ran={ran && !error} />
     </section>
   )
+}
+
+/**
+ * Where the search was scrolled to, put back on return; every other page
+ * opens at its top rather than halfway down a list of results.
+ */
+function useSearchScroll(onSearch: boolean) {
+  const saved = useRef(0)
+  useEffect(() => {
+    if (!onSearch) {
+      window.scrollTo(0, 0)
+      return
+    }
+    window.scrollTo(0, saved.current)
+    const record = () => {
+      // TRAP: hiding the search shortens the page, and the browser reports the
+      // clamped scroll before this listener is removed. By then the hash has
+      // already moved on, which is what tells the two apart.
+      if (parse(window.location.hash).name === 'search') saved.current = window.scrollY
+    }
+    window.addEventListener('scroll', record, { passive: true })
+    return () => window.removeEventListener('scroll', record)
+  }, [onSearch])
 }
 
 /**
@@ -123,6 +146,7 @@ function Badge({ letter }: { letter: string }) {
 export default function App() {
   const { account, loading, signInWithGoogle, signOut } = useSession()
   const route = useRoute()
+  useSearchScroll(route.name === 'search')
 
   return (
     <>
@@ -170,6 +194,14 @@ export default function App() {
         {/* Nothing until /api/me has answered, for the same reason the header
             waits: rendering the gate first would show "connectez-vous" to
             somebody who already is, on every load. */}
+        {/* Mounted for as long as somebody is signed in, and only hidden while
+            another page shows: going back to it finds the form, the results
+            and the map as they were, without searching again. */}
+        {!loading && account ? (
+          <div hidden={route.name !== 'search'}>
+            <Search />
+          </div>
+        ) : null}
         {loading ? null : route.name === 'saved' ? (
           <Saved signedIn={Boolean(account)} />
         ) : route.name === 'detail' ? (
@@ -186,9 +218,7 @@ export default function App() {
               onSignIn={() => void signInWithGoogle()}
             />
           )
-        ) : account ? (
-          <Search />
-        ) : (
+        ) : account ? null : (
           <Gate
             title="Retrouvez un logement à partir de son DPE"
             lede="Une annonce publie la classe énergie, la surface et la commune, mais pas l’adresse. Le diagnostic, lui, est public. Connectez-vous pour l’interroger."
