@@ -30,6 +30,10 @@ SAMPLE = 40
 PARQUET_DIR = Path(
     os.environ.get("ADEME_PARQUET_DIR", str(DEFAULT_DB.parent / "parquet" / "v1"))
 )
+# Where `python -m ademe.recent split` put the paid tree beside it. ADR-0039.
+RECENT_DIR = Path(
+    os.environ.get("ADEME_RECENT_DIR", str(PARQUET_DIR.parent / "recent" / PARQUET_DIR.name))
+)
 
 
 def _equal(col: str, want: str, got: str, numeric: set[str]) -> bool:
@@ -168,21 +172,33 @@ def test_published_parquet_round_trips():
 
     import duckdb
 
+    manifest = __import__("json").loads((PARQUET_DIR / "manifest.json").read_text())
+    recent_dir = None
+    if "recent" in manifest:
+        if (RECENT_DIR / "manifest.json").exists():
+            recent_dir = RECENT_DIR
+        elif os.environ.get("CI"):
+            # Half the published rows unchecked is not a pass.
+            raise AssertionError(f"the manifest is split but no recent tree at {RECENT_DIR}")
+        else:
+            pytest.skip(f"the manifest is split but no recent tree at {RECENT_DIR}")
+
     d = duckdb.connect()
     numeros = [
         r[0]
+        for tree, n in ((PARQUET_DIR, SAMPLE), (recent_dir, SAMPLE // 4))
+        if tree
         for r in d.execute(
-            f"SELECT numero_dpe FROM read_parquet('{PARQUET_DIR}/dpe/*/*.parquet')"
-            f" USING SAMPLE {SAMPLE} ROWS"
+            f"SELECT numero_dpe FROM read_parquet('{tree}/dpe/*/*.parquet')"
+            f" USING SAMPLE {n} ROWS"
         ).fetchall()
     ]
     assert numeros, "the export is empty"
 
-    published = export_parquet.read_rows(PARQUET_DIR, numeros)
+    published = export_parquet.read_rows(PARQUET_DIR, numeros, recent_dir=recent_dir)
     source = _fetch(api.client(), numeros)
     assert source, "could not fetch the comparison records"
 
-    manifest = __import__("json").loads((PARQUET_DIR / "manifest.json").read_text())
     numeric = {
         c
         for c, m in manifest["column_meta"].items()
