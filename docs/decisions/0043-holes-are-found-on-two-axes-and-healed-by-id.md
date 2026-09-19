@@ -49,9 +49,24 @@ counts it was making anyway.
 
 **Axis 2 — the modification date.** `delta.date_holes` counts published rows per month of the
 modified field and asks ADEME for the same window. A month that agrees costs one request. Only a
-month that disagrees is split into days, and only a day that disagrees has its ids pulled
+month **ADEME holds more rows in** is split into days, and only such a day has its ids pulled
 (`select=<key>`) and diffed against the ids published under that date. What comes back is what
 upstream holds and we do not: **missing, or here under another date, which is a stale version.**
+
+**The two axes must not report each other's work, and the order is what stops them.** The key axis
+runs first and hands its deletions to the date axis, which leaves them out of its own counts. A row
+that left the dataset is still in the tree until the rewrite, and by date it looks exactly like a day
+ADEME is short of. The first national dry run (2026-09-19, run 35474909563) is the measurement: on a
+tree that had missed two weekly runs, every département was over by a handful — 204 rows in 76, 578
+in NG — and the date axis called **209 days across 10 months** suspect, tripped `MAX_HOLE_DAYS` and
+published nothing, including the deletions it had just found.
+
+That cuts both ways, so both halves are needed:
+
+* **Deletions out of our counts**, or a deletion in a month masks a row re-issued into it: one too
+  many and one too few cancel, the month looks right, and a stale version stays published.
+* **Only where upstream holds more**, because the other direction is a day this pass could never
+  fill — its ids are pulled and nothing comes of them.
 
 Measured live, 2026-09-20, over each source's whole history:
 
@@ -110,9 +125,16 @@ Why the others fail:
   the existing fail-closed behaviour, and the message says what to run.
 * Neutral: the reconcile step now runs in a quiet week too, where it used to be skipped for the
   sources whose delta wrote no tree. A hole is not made by this week's modifications.
-* Residual blind spot: a row ADEME holds under a date outside the months walked (older than the
-  oldest month published here) is invisible to the date axis — the key axis finds it, by count. A
-  swap inside one key range *and* one day is invisible to both.
+* Residual blind spots, all three narrow and all three recorded rather than papered over:
+  * a row ADEME holds under a date outside the months walked (older than the oldest month published
+    here) is invisible to the date axis — the key axis finds it, by count;
+  * a swap inside one key range *and* one day is invisible to both;
+  * a stale version whose old and new dates fall in the **same calendar month** does not move any
+    month's count, so the days inside it are never examined. Such a row was modified since we last
+    saw it and within the same month, which is what the ordinary delta fetches; it only survives
+    when the mark was wrong, and then the row is usually missing outright rather than stale. Day
+    counts for the whole history would close it, at about 1,900 requests a source a week instead
+    of 63.
 
 ### Confirmation
 
@@ -127,6 +149,10 @@ Why the others fail:
 * `test_a_repair_never_moves_the_mark` — without `keep_mark`: `assert '2026-09-30' == '2026-08-02'`.
 * `test_a_repair_over_the_cap_publishes_nothing_and_names_the_command` and its script twin —
   without the cap: `Failed: DID NOT RAISE ReconcileError`.
+* `test_deletions_are_not_mistaken_for_holes` replays run 35474909563, and
+  `test_a_deletion_does_not_hide_a_hole_in_the_same_month` pins the other direction — with the
+  deletions counted as ours again: `assert [] == ['2409E0000002']`, "the re-issued row hid behind
+  the deletion".
 * `test_a_repair_refuses_when_upstream_will_not_hand_over_what_it_counted`,
   `test_a_republication_is_not_repaired_quietly`, `test_agreeing_months_pull_no_ids`.
 * `test_the_weekly_job_repairs_through_the_script` runs `scripts/reconcile.py --repair`, which is

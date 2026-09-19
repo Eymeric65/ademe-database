@@ -1236,6 +1236,67 @@ def test_a_swap_that_hides_from_the_key_ranges_is_found_by_date(base, tmp_path, 
     assert up.ids_pulled < 20
 
 
+def test_deletions_are_not_mistaken_for_holes(base, tmp_path, ademe, monkeypatch):
+    """What the first national dry run hit (2026-09-19, run 35474909563).
+
+    A row that left the dataset is still in this tree until the rewrite, and
+    counted by date it looks exactly like a day ADEME is short of. On existing
+    housing, which had missed two weekly runs, that was 209 days across 10
+    months -- past `MAX_HOLE_DAYS`, so the job published nothing and the
+    deletions it had just found went unapplied. The date axis is given the
+    deletions, and only follows a window ADEME holds MORE rows in.
+    """
+    published, _ = base
+    up = ademe(
+        [
+            _row("2409E0000001", "09", "2026-08-01"),
+            _row("2431E0000001", "31", "2026-08-01"),  # 2409E0000002 left the dataset
+        ]
+    )
+    monkeypatch.setattr(delta, "MAX_HOLE_DAYS", 0)
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, published, out)
+
+    assert healed.gone == {"09": ["2409E0000002"]}
+    assert healed.fetched == []
+    assert set(_published_rows(out)) == {"2409E0000001"}
+    assert up.ids_pulled <= 2, "the date axis chased a day it could never fill"
+
+
+def test_a_deletion_does_not_hide_a_hole_in_the_same_month(base, tmp_path, ademe):
+    """The other half of the same fix. A row that left the dataset is one too
+    many for us in its month; a row re-issued into that month is one too few.
+    Counted together they cancel, and the month looks right while a stale
+    version sits in the tree. Taking the deletions out of our own count first is
+    what stops one axis hiding the other's work."""
+    published, _ = base
+    ademe(
+        [
+            _row("2409E0000001", "09", "2026-08-01"),
+            _row("2409E0000002", "09", "2026-09-20", etiquette_dpe="A"),  # re-issued
+            # 2431E0000001 left the dataset, and this tree holds it under 09-05
+        ]
+    )
+    # The published tree's 31 partition is dated into the same month.
+    tree = tmp_path / "shifted"
+    rows = [
+        _row("2409E0000001", "09", "2026-08-01"),
+        _row("2409E0000002", "09", "2026-08-02", etiquette_dpe="E"),
+        _row("2431E0000001", "31", "2026-09-05"),
+    ]
+    path, conn = _build(tmp_path, "shifted", rows)
+    export_parquet.export(path, tree)
+    conn.close()
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, tree / export_parquet.VERSION, out)
+
+    assert healed.gone == {"31": ["2431E0000001"]}
+    assert healed.fetched == ["2409E0000002"], "the re-issued row hid behind the deletion"
+    assert _published_rows(out)["2409E0000002"] == "A"
+
+
 def test_a_repair_never_moves_the_mark(base, tmp_path, ademe):
     """TRAP: the repair's own rows are fetched by id, of any age, and the newest
     of them says nothing about what ADEME held when anything was fetched.

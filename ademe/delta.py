@@ -652,20 +652,26 @@ def _dpe_files(root: Path | str, manifest: dict) -> list[str]:
     ]
 
 
-def _by_date(duck, files: list[str], modified: str, width: int) -> dict[str, int]:
+def _by_date(
+    duck, files: list[str], modified: str, width: int, key: str | None = None
+) -> dict[str, int]:
     """Published rows by the first `width` characters of the modified field --
     7 is a month, 10 a day.
 
     Cast to text rather than to a date: the column is a DATE in one source and
     an ISO string in another, and both bucket the same this way. A row with no
     date at all buckets as ''.
+
+    Rows in the temporary table `gone` are left out, because this count is
+    compared against ADEME and those rows are about to be deleted from it.
     """
     scan = ", ".join(f"'{f}'" for f in files)
+    where = f' WHERE "{key}" NOT IN (SELECT id FROM gone)' if key else ""
     return {
         bucket: n
         for bucket, n in duck.execute(
             f"SELECT COALESCE(substr(CAST(\"{modified}\" AS VARCHAR), 1, {width}), '') AS bucket,"
-            f" COUNT(*) FROM read_parquet([{scan}], hive_partitioning = false) GROUP BY 1"
+            f" COUNT(*) FROM read_parquet([{scan}], hive_partitioning = false){where} GROUP BY 1"
         ).fetchall()
     }
 
@@ -687,7 +693,14 @@ def _window_qs(modified: str, lo: str | None, hi: str | None) -> str:
     return f"{modified}:[{lo} TO {hi}}}"
 
 
-def date_holes(client, root: Path | str, *, source: Source = EXISTANT, quiet: bool = True) -> set[str]:
+def date_holes(
+    client,
+    root: Path | str,
+    *,
+    source: Source = EXISTANT,
+    quiet: bool = True,
+    gone: "set[str] | None" = None,
+) -> set[str]:
     """The ids ADEME holds under a modification date that this tree does not.
 
     The second axis, and it sees what counting per partition cannot. A row we
@@ -700,15 +713,26 @@ def date_holes(client, root: Path | str, *, source: Source = EXISTANT, quiet: bo
     rows published against 33 471 upstream for 09-01..09-03, which no count per
     département could see, because the rows were never fetched at all.
 
-    Months first, one count each. Only a month that disagrees is split into
-    days, and only a day that disagrees has its ids pulled.
+    Months first, one count each. Only a month ADEME holds MORE rows in is split
+    into days, and only such a day has its ids pulled.
+
+    TRAP, measured on the first national run (2026-09-19): the other direction
+    means we hold rows ADEME does not, which is every deletion that has not been
+    applied yet -- and on a tree that had missed two weekly runs that was 209
+    days across 10 months, enough to trip `MAX_HOLE_DAYS` and publish nothing.
+    Those rows are not holes, they are the key axis's job, and `gone` is exactly
+    the ids it has just found. They come out of the published counts here, so
+    the two axes do not report each other's work.
     """
     manifest = read_manifest(root)
     modified, key = source.mapping.modified, source.mapping.key
     duck = _duck()
     try:
+        duck.execute("CREATE TEMP TABLE gone (id VARCHAR)")
+        if gone:
+            duck.executemany("INSERT INTO gone VALUES (?)", [(n,) for n in gone])
         files = _dpe_files(root, manifest)
-        mine = _by_date(duck, files, modified, 7)
+        mine = _by_date(duck, files, modified, 7, key)
         newest = (api.high_water(client, source=source) or "")[:7]
         months = sorted(m for m in mine if m)
         # Every month from the oldest published one to the one ADEME is
@@ -723,16 +747,16 @@ def date_holes(client, root: Path | str, *, source: Source = EXISTANT, quiet: bo
         suspect: list[tuple[str | None, str | None]] = []
         for month in wanted:
             lo, hi = _month(month)
-            if api.total(client, qs=_window_qs(modified, lo, hi), source=source) != mine.get(month, 0):
+            if api.total(client, qs=_window_qs(modified, lo, hi), source=source) > mine.get(month, 0):
                 suspect.append((lo, hi))
-        if api.total(client, qs=_window_qs(modified, None, None), source=source) != mine.get("", 0):
+        if api.total(client, qs=_window_qs(modified, None, None), source=source) > mine.get("", 0):
             suspect.append((None, None))
         if not quiet:
-            print(f"  {len(wanted)} month(s) counted, {len(suspect)} disagree")
+            print(f"  {len(wanted)} month(s) counted, {len(suspect)} hold more upstream")
         if not suspect:
             return set()
 
-        by_day = _by_date(duck, files, modified, 10)
+        by_day = _by_date(duck, files, modified, 10, key)
         days: list[tuple[str | None, str | None]] = []
         for lo, hi in suspect:
             if lo is None:
@@ -743,14 +767,14 @@ def date_holes(client, root: Path | str, *, source: Source = EXISTANT, quiet: bo
                 nxt = day + timedelta(days=1)
                 if api.total(
                     client, qs=_window_qs(modified, day.isoformat(), nxt.isoformat()), source=source
-                ) != by_day.get(day.isoformat(), 0):
+                ) > by_day.get(day.isoformat(), 0):
                     days.append((day.isoformat(), nxt.isoformat()))
                 day = nxt
         if len(days) > MAX_HOLE_DAYS:
             raise ReconcileError(
-                f"{len(days)} days disagree with ADEME, over {len(suspect)} month(s);"
-                " that is a republication rather than a hole. Publishing nothing:"
-                " look at the run before re-running."
+                f"ADEME holds more rows than this tree on {len(days)} days, over"
+                f" {len(suspect)} month(s); that is a republication rather than a hole."
+                " Publishing nothing: look at the run before re-running."
             )
 
         scan = ", ".join(f"'{f}'" for f in files)
@@ -853,8 +877,17 @@ def heal(
     base_manifest = read_manifest(root)
     report = reconcile(client, root, quiet=quiet, source=source)
     ids = {n for div in report.values() for n in div.appeared}
-    ids |= date_holes(client, root, source=source, quiet=quiet)
     gone = {dept: list(div.gone) for dept, div in report.items() if div.gone}
+    # The key axis first, and its deletions handed to the date axis: a row that
+    # left the dataset is still in this tree, and counted by date it looks
+    # exactly like a day ADEME is short of. See `date_holes`.
+    ids |= date_holes(
+        client,
+        root,
+        source=source,
+        quiet=quiet,
+        gone={n for left in gone.values() for n in left},
+    )
 
     work = Path(work) if work else Path(tempfile.mkdtemp())
     work.mkdir(parents=True, exist_ok=True)
