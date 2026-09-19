@@ -17,11 +17,16 @@ import { isSource, type SourceId } from './data/sources'
  */
 export type DetailRef = { source: SourceId; key: string; dept: string | null }
 
-export type Route = { name: 'search' } | { name: 'saved' } | ({ name: 'detail' } & DetailRef)
+export type Route =
+  | { name: 'search' }
+  | { name: 'saved' }
+  | { name: 'presentation' }
+  | ({ name: 'detail' } & DetailRef)
 
 export function parse(hash: string): Route {
   const path = hash.replace(/^#/, '')
   if (path === '/saved') return { name: 'saved' }
+  if (path === '/presentation') return { name: 'presentation' }
   // The first links, and every row saved before ADR-0034: existing housing.
   const legacy = /^\/dpe\/([^/]+)$/.exec(path)
   if (legacy) {

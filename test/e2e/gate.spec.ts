@@ -71,3 +71,46 @@ test('a certificate link shared with a stranger shows the gate', async ({ page }
   // nothing was fetched, rather than fetched and not rendered.
   await expect(page.getByText('conso_5_usages_ef')).toHaveCount(0)
 })
+
+/**
+ * The presentation is what a stranger reads before deciding to sign in, so it
+ * sits under the gate on the landing page and has a menu entry of its own.
+ */
+const GAPS = 'Ce que l’annonce ne dit pas'
+
+test('a stranger reads the presentation under the sign-in prompt', async ({ page }) => {
+  await page.goto('/')
+
+  const cta = page.getByRole('button', { name: 'Se connecter et chercher' })
+  const gaps = page.getByRole('heading', { name: GAPS })
+  await expect(cta).toBeVisible()
+  await expect(gaps).toBeVisible()
+  const [above, below] = [await cta.boundingBox(), await gaps.boundingBox()]
+  expect(below!.y).toBeGreaterThan(above!.y)
+})
+
+test('the presentation is the first entry of the menu, and a page of its own', async ({ page }) => {
+  await page.goto('/')
+
+  const menu = page.getByRole('navigation', { name: 'Principal' }).getByRole('link')
+  await expect(menu.first()).toHaveText('Présentation')
+  await menu.first().click()
+
+  await expect(page).toHaveURL(/#\/presentation$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+    'L’annonce montre une lettre. Le diagnostic montre le logement.',
+  )
+  await expect(page.getByRole('heading', { name: GAPS })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Retrouvez un logement à partir de son DPE' }),
+  ).toHaveCount(0)
+})
+
+test('signed in, the landing page is still the search', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('presentation'))
+  await page.goto('/')
+
+  await expect(page.locator('form.search #cp')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Présentation' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: GAPS })).toHaveCount(0)
+})

@@ -30,6 +30,10 @@ describe('the hash routes', () => {
     }
   })
 
+  it('has a presentation page of its own', () => {
+    expect(parse('#/presentation')).toEqual({ name: 'presentation' })
+  })
+
   it('does not take an unknown source for a certificate', () => {
     expect(parse('#/bogus/09/X')).toEqual({ name: 'search' })
     expect(parse('#/saved')).toEqual({ name: 'saved' })
