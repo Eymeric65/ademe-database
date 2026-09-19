@@ -235,6 +235,204 @@ def test_the_high_water_mark_never_moves_backwards(base, tmp_path):
     assert {p["dept"]: p["rows"] for p in m["partitions"]}["09"] == 3
 
 
+# --- the mark across ADEME's batches (ADR-0041) -----------------------------
+
+
+class Upstream:
+    """ADEME as a build sees it: the rows published so far, and batches that
+    land while a build is part-way through. Stubbed at the api module, so the
+    tests state what ADEME held at each moment and nothing else."""
+
+    MOD = "date_derniere_modification_dpe"
+
+    def __init__(self, rows: list[dict]):
+        self.rows = list(rows)
+        self.die_after: int | None = None  # pages served before the run is killed
+        self.land_after_first_page: list[dict] = []
+
+    def publish(self, *rows: dict) -> None:
+        self.rows += rows
+
+    def high_water(self, _client, *, source=None):
+        return max(r[self.MOD] for r in self.rows)
+
+    def _match(self, departement, qs):
+        rows = self.rows
+        if departement:
+            rows = [r for r in rows if r["code_departement_ban"] == departement]
+        if qs:
+            since = re.fullmatch(rf"{self.MOD}:\[(\S+) TO \*\]", qs).group(1)
+            rows = [r for r in rows if r[self.MOD] >= since]
+        return rows
+
+    def total(self, _client, *, departement=None, qs=None, source=None):
+        return len(self._match(departement, qs))
+
+    def iter_pages(self, _client, *, departement=None, qs=None, start_url=None, **_kw):
+        """One row a page, resumable by the index of the next one -- the shape
+        of the `after=` cursor, a position rather than an identity."""
+        i = int(start_url.split(":")[1]) if start_url else 0
+        served = 0
+        while True:
+            rows = self._match(departement, qs)
+            if i >= len(rows):
+                return
+            if self.die_after is not None and served == self.die_after:
+                raise ConnectionError("killed mid-departement")
+
+            class Page:
+                pass
+
+            p = Page()
+            p.rows, p.next_url, p.nbytes = [rows[i]], f"cursor:{i + 1}", 0
+            yield p
+            i += 1
+            served += 1
+            if served == 1 and self.land_after_first_page:
+                self.publish(*self.land_after_first_page)
+                self.land_after_first_page = []
+
+
+@pytest.fixture
+def upstream(monkeypatch):
+    """`raising=False` because `api.high_water` is what ADR-0041 adds: before
+    it exists these tests fail on their assertions, not on the stub."""
+    up = Upstream([])
+    for name in ("total", "iter_pages"):
+        monkeypatch.setattr(ingest.api, name, getattr(up, name))
+    monkeypatch.setattr(ingest.api, "high_water", up.high_water, raising=False)
+    monkeypatch.setattr(ingest.api, "client", lambda: None)
+    return up
+
+
+def _base_build(tmp_path):
+    path = tmp_path / "base.sqlite"
+    schema.build(path, scales=SCALES)
+    conn = db.connect(path, bulk=True)
+    return path, conn, ingest.Loader(conn, spec.load(SCALES))
+
+
+def _mark(path, tmp_path) -> str | None:
+    return export_parquet.export(path, tmp_path / "published")["high_water"]
+
+
+def test_a_build_spanning_a_batch_marks_the_oldest_snapshot(upstream, tmp_path):
+    """The hole of 2026-09: 09 was fetched while ADEME held rows up to 08-31,
+    a batch landed, and 31 was fetched with rows up to 09-07. The batch also
+    carried 09's rows of 09-01..09-06, which the build never saw. A mark of
+    09-07 means no delta ever asks for them."""
+    upstream.publish(_row("2409E0000001", "09", "2026-08-01"), _row("2409E0000002", "09", "2026-08-31"),
+                     _row("2431E0000001", "31", "2026-08-20"))
+    path, conn, loader = _base_build(tmp_path)
+    ingest.ingest_departement(conn, loader, None, "09", quiet=True)
+    upstream.publish(_row("2409E0000003", "09", "2026-09-03"), _row("2431E0000002", "31", "2026-09-07"))
+    ingest.ingest_departement(conn, loader, None, "31", quiet=True)
+    conn.close()
+
+    assert _mark(path, tmp_path) == "2026-08-31"
+
+
+def test_the_hole_is_fetched_by_the_next_delta(upstream, tmp_path):
+    """The same build, then the weekly delta against it: the certificate 09
+    missed must be published afterwards."""
+    upstream.publish(_row("2409E0000001", "09", "2026-08-01"), _row("2409E0000002", "09", "2026-08-31"))
+    path, conn, loader = _base_build(tmp_path)
+    ingest.ingest_departement(conn, loader, None, "09", quiet=True)
+    upstream.publish(_row("2409E0000003", "09", "2026-09-03"), _row("2431E0000001", "31", "2026-09-07"))
+    ingest.ingest_departement(conn, loader, None, "31", quiet=True)
+    conn.close()
+    published = tmp_path / "published" / export_parquet.VERSION
+    export_parquet.export(path, tmp_path / "published")
+
+    out = tmp_path / "out"
+    assert delta.main(["--base-url", str(published), "--out", str(out),
+                       "--db-path", str(tmp_path / "d.sqlite")]) == 0
+
+    got = export_parquet.read_rows(out / export_parquet.VERSION, ["2409E0000003"])
+    assert "2409E0000003" in got, "the certificate the base build missed is still missing"
+
+
+def test_a_quiet_departement_does_not_drag_the_mark_back(upstream, tmp_path):
+    """975 holds two certificates, the newest from 2025-12-18. A mark taken
+    from each departement's own newest row would be that date, and every
+    delta would re-fetch nine months of France."""
+    upstream.publish(_row("24975E000001", "975", "2025-12-18"), _row("2409E0000001", "09", "2026-09-07"))
+    path, conn, loader = _base_build(tmp_path)
+    for code in ("09", "975"):
+        ingest.ingest_departement(conn, loader, None, code, quiet=True)
+    conn.close()
+
+    assert _mark(path, tmp_path) == "2026-09-07"
+
+
+def test_a_resumed_departement_keeps_the_mark_of_its_first_start(upstream, tmp_path):
+    """Departement 30 was killed, sat through a batch, and resumed. Its pages
+    before the kill are the older snapshot, so its mark is the first start's."""
+    upstream.publish(_row("2409E0000001", "09", "2026-08-01"), _row("2409E0000002", "09", "2026-08-31"))
+    path, conn, loader = _base_build(tmp_path)
+    upstream.die_after = 1
+    with pytest.raises(ConnectionError):
+        ingest.ingest_departement(conn, loader, None, "09", quiet=True)
+    upstream.die_after = None
+    upstream.publish(_row("2409E0000003", "09", "2026-09-07"))
+    ingest.ingest_departement(conn, loader, None, "09", quiet=True)
+    conn.close()
+
+    assert _mark(path, tmp_path) == "2026-08-31"
+
+
+def test_a_delta_marks_what_ademe_held_when_it_started(upstream, base, tmp_path):
+    """A batch landing during the weekly pass: rows ahead of the cursor are
+    fetched, rows behind it are not. The mark is what ADEME held at the start,
+    or the ones behind the cursor are skipped for good."""
+    _, manifest = base
+    upstream.publish(_row("2409E0000010", "09", "2026-09-14"))
+    upstream.land_after_first_page = [_row("2409E0000011", "09", "2026-09-16")]
+    path = tmp_path / "delta.sqlite"
+    delta.fetch_delta(None, "2026-09-10", path, manifest)
+
+    assert _mark(path, tmp_path) == "2026-09-14"
+
+
+def _ledger(path, rows: list[tuple]):
+    conn = db.connect(path)
+    for code, mark in rows:
+        conn.execute(
+            "INSERT INTO ingest_departement (code_departement, started_at, completed_at,"
+            " upstream_high_water) VALUES (?, datetime(), datetime(), ?)",
+            (code, mark),
+        )
+    conn.commit()
+    conn.close()
+
+
+def test_a_build_with_some_marks_missing_publishes_no_mark(tmp_path, capsys):
+    """A build from before ADR-0041, resumed with this code: the old
+    departements' snapshots are unknown, so any mark could hide a hole. None
+    makes the delta stop and ask for --since."""
+    path, conn = _build(tmp_path, "mixed", [_row("2409E0000001", "09", "2026-09-07"),
+                                            _row("2431E0000001", "31", "2026-09-07")])
+    conn.close()
+    _ledger(path, [("09", None), ("31", "2026-09-07")])
+
+    assert _mark(path, tmp_path) is None
+    assert "09" in capsys.readouterr().err
+
+
+def test_a_build_without_marks_keeps_the_max_and_says_so(tmp_path, capsys):
+    """Every build made before ADR-0041. Its mark is what it always was, and
+    the export says it may hide a hole rather than letting it pass."""
+    path, conn = _build(tmp_path, "old", [_row("2409E0000001", "09", "2026-08-31"),
+                                          _row("2431E0000001", "31", "2026-09-07")])
+    conn.execute("INSERT INTO ingest_departement (code_departement, started_at, completed_at)"
+                 " VALUES ('09', datetime(), datetime()), ('31', datetime(), datetime())")
+    conn.commit()
+    conn.close()
+
+    assert _mark(path, tmp_path) == "2026-09-07"
+    assert "high_water" in capsys.readouterr().err
+
+
 def test_a_sharp_departure_is_flagged_rather_than_published():
     """ADEME republishing a whole departement looks from here like an ordinary
     week with a big number. The point is to stop and be looked at."""
@@ -277,6 +475,22 @@ def test_the_incremental_key_really_filters():
     assert rows
     for r in rows:
         assert r["date_derniere_modification_dpe"] >= "2026-08-25"
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("slug", ["existant", "neuf", "tertiaire", "audit"])
+def test_ademe_names_its_newest_modification(slug):
+    """The mark a build records (ADR-0041). A date nothing is modified on or
+    after would be a mark that fetches nothing."""
+    from ademe import api
+    from ademe.config import SOURCES
+
+    source = SOURCES[slug]
+    client = api.client()
+    mark = api.high_water(client, source=source)
+
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", mark)
+    assert api.total(client, qs=f"{source.mapping.modified}:[{mark} TO *]", source=source) > 0
 
 
 # --- reconciliation ---------------------------------------------------------

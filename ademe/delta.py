@@ -102,6 +102,7 @@ def fetch_delta(
         # Inclusive lower bound: the mark is a DATE, so a strict bound would
         # drop everything else modified on the same day as the last run.
         qs = f"{source.mapping.modified}:[{since} TO *]"
+        mark = api.high_water(client, source=source)  # before the first page: ADR-0041
         for page in api.iter_pages(client, qs=qs, page_size=page_size, source=source):
             with db.transaction(conn):
                 loaded += loader.load_page(page.rows)
@@ -109,10 +110,11 @@ def fetch_delta(
                 print(f"\r  fetched {loaded:,}", end="", flush=True)
         conn.execute(
             "INSERT INTO ingest_departement"
-            " (code_departement, total_expected, rows_loaded, started_at, completed_at)"
-            " VALUES ('delta', ?, ?, datetime(), datetime())"
+            " (code_departement, total_expected, rows_loaded, started_at, completed_at,"
+            "  upstream_high_water)"
+            " VALUES ('delta', ?, ?, datetime(), datetime(), ?)"
             " ON CONFLICT(code_departement) DO UPDATE SET rows_loaded = excluded.rows_loaded",
-            (loaded, loaded),
+            (loaded, loaded, mark),
         )
         conn.commit()
         if not quiet:
