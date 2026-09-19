@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { signUpViaApi, uniqueEmail } from './helpers'
+import { makePaid, signUpViaApi, uniqueEmail } from './helpers'
 
 /**
  * The certificates require a session, and the proof is at the transport.
@@ -50,6 +50,18 @@ test('a signed-in caller reads them, with ranges intact', async ({ page }) => {
   expect(part.status()).toBe(206)
   expect(part.headers()['content-range']).toMatch(/^bytes 0-99\/\d+$/)
   expect((await part.body()).byteLength).toBe(100)
+})
+
+test('the last two months answer 403 to a free member and 200 to a paid one', async ({ page }) => {
+  const email = uniqueEmail('gate-paid')
+  await signUpViaApi(page, email)
+  expect((await page.request.get('/data/recent/v1/manifest.json')).status()).toBe(403)
+
+  await makePaid(page, email)
+  const res = await page.request.get('/data/recent/v1/manifest.json')
+  expect(res.status()).toBe(200)
+  expect(res.headers()['cache-control']).toContain('no-store')
+  expect(((await res.json()) as { partitions: unknown[] }).partitions.length).toBeGreaterThan(0)
 })
 
 test('the engine stays reachable signed out, and still says application/wasm', async ({ page }) => {

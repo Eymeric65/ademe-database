@@ -61,11 +61,17 @@ const BASE = new URL(
  * The worker JS stays in the app bundle: `new Worker()` cannot load a
  * cross-origin script, whereas fetching the module cross-origin is fine.
  */
-const VENDOR = `${BASE.replace(/\/v1\/?$/, '')}/vendor/duckdb`
+const ROOT = BASE.replace(/\/v1\/?$/, '')
+const VENDOR = `${ROOT}/vendor/duckdb`
 
 /** A published tree: existant at `v1/` itself, everything else beside it. */
 function tree(subdir: string): string {
   return subdir ? `${BASE}/${subdir}` : BASE
+}
+
+/** The paid tree beside a split one, `recent/v1/<subdir>`; served to paid callers only. */
+function recentTree(m: Manifest): string {
+  return `${ROOT}/${m.recent?.tree}`
 }
 
 export type { Hit } from './sources'
@@ -79,6 +85,8 @@ export type Manifest = {
   column_meta?: Record<string, ColumnMeta>
   search_columns?: string[]
   key?: string
+  /** Present once the weekly job splits the tree (ADR-0039). */
+  recent?: { cutoff: string; date_column: string; counts_columns: string[]; tree: string }
   partitions: Partition[]
 }
 
@@ -178,11 +186,16 @@ const WHOLE_SEARCH = 4 * 1024 * 1024
 const MAX_BUFFERS = 6
 const buffers = new Map<string, Promise<string>>()
 
-/** What DuckDB should read for one partition's search file: a buffer or a URL. */
-async function searchFile(subdir: string, p: Partition): Promise<string> {
-  const path = p.search?.path ?? `search/dept=${p.dept}/part-0000.parquet`
-  const url = `${tree(subdir)}/${path}`
-  if (!p.search || p.search.bytes > WHOLE_SEARCH) return url
+type FileRef = NonNullable<Partition['search']>
+
+/**
+ * What DuckDB should read for one small file: a buffer or a URL. `prefix`
+ * names the buffer, and must differ between trees that share paths.
+ */
+async function searchFile(treeUrl: string, prefix: string, ref: FileRef): Promise<string> {
+  const path = ref.path
+  const url = `${treeUrl}/${path}`
+  if (ref.bytes > WHOLE_SEARCH) return url
 
   let pending = buffers.get(url)
   if (!pending) {
@@ -190,7 +203,7 @@ async function searchFile(subdir: string, p: Partition): Promise<string> {
       const res = await fetch(url)
       if (!res.ok) throw new Error(`${path}: ${res.status}`)
       // The name keeps `/dept=XX/`, which is how a hit knows its partition.
-      const name = `${subdir || 'existant'}/${path}`
+      const name = `${prefix}/${path}`
       await (await db()).registerFileBuffer(name, new Uint8Array(await res.arrayBuffer()))
       return name
     })()
@@ -206,16 +219,39 @@ async function searchFile(subdir: string, p: Partition): Promise<string> {
   return pending
 }
 
-export async function search(spec: QuerySpec): Promise<Hit[]> {
+/**
+ * A search's hits and, for a free member, how many recent rows it matched.
+ *
+ * A paid member reads the base and recent files in one query, so the order and
+ * the total are the same as on a tree never split. A free member never asks
+ * for the recent tree -- the Worker would answer 403 -- and counts the matches
+ * in the counts files instead. See ADR-0039.
+ */
+export async function search(spec: QuerySpec, paid: boolean): Promise<{ hits: Hit[]; newer: number }> {
   const src = SOURCE[spec.source ?? 'existant']
   const m = await manifest(src.subdir)
   const depts = await partitionsFor(spec)
-  const files = await Promise.all(
-    m.partitions.filter((p) => depts.includes(p.dept)).map((p) => searchFile(src.subdir, p)),
-  )
-  if (!files.length) return []
+  const parts = m.partitions.filter((p) => depts.includes(p.dept))
+  const name = src.subdir || 'existant'
+  const base = parts.map((p) => searchFile(tree(src.subdir), name, p.search ?? {
+    path: `search/dept=${p.dept}/part-0000.parquet`, bytes: Infinity, sha256: '',
+  }))
+  const recent = m.recent ? parts.filter((p) => p.recent?.rows) : []
+  const paidFiles = paid ? recent.map((p) => searchFile(recentTree(m), `recent/${name}`, p.recent!.search)) : []
+  const counts = paid ? [] : recent.flatMap((p) => (p.counts ? [searchFile(tree(src.subdir), name, p.counts)] : []))
+
+  const files = await Promise.all([...base, ...paidFiles])
+  if (!files.length) return { hits: [], newer: 0 }
   const { sql, params } = searchQuery(src, spec, files)
-  return (await query(sql, params)).map((row) => toHit(src, row))
+  const [rows, newer] = await Promise.all([
+    query(sql, params),
+    Promise.all(counts).then(async (files) => {
+      if (!files.length) return 0
+      const c = searchQuery(src, spec, files, 'count')
+      return Number((await query(c.sql, c.params))[0]?.n ?? 0)
+    }),
+  ])
+  return { hits: rows.map((row) => toHit(src, row)), newer }
 }
 
 // --- detail -----------------------------------------------------------------
@@ -234,39 +270,55 @@ export type Record_ = {
  * it is 670 302 rows, and loading it into a Map cost every first detail 2.3 MB
  * and seconds of JavaScript. See ADR-0035.
  */
-async function exception(src: Source, numero: string): Promise<string | null> {
+async function exception(treeUrl: string, numero: string): Promise<string | null> {
   const rows = await query(
-    `SELECT dept FROM read_parquet(${quote(`${tree(src.subdir)}/index/numero-exceptions.parquet`)},` +
+    `SELECT dept FROM read_parquet(${quote(`${treeUrl}/index/numero-exceptions.parquet`)},` +
       ` hive_partitioning = false) WHERE numero_dpe = ? LIMIT 1`,
     [numero],
   )
   return rows.length ? String(rows[0]?.dept) : null
 }
 
-/** Every column of one record, read from the one partition that holds it. */
-export async function detail(ref: DetailRef): Promise<Record_ | null> {
-  const src = SOURCE[ref.source]
-  const m = await manifest(src.subdir)
-  const known = new Set(m.partitions.map((p) => p.dept))
-
+/** One record from one tree, or null when that tree does not hold it. */
+async function lookup(
+  src: Source,
+  treeUrl: string,
+  known: Set<string>,
+  ref: DetailRef,
+): Promise<{ row: Record<string, unknown>; dept: string } | null> {
   // A link from a result carries its partition; a saved row from before
   // ADR-0034, or a pasted numero, has to be located.
   let dept = ref.dept && known.has(ref.dept) ? ref.dept : null
   if (!dept && src.numeroLocates) {
     const guess = partitionOfNumero(ref.key)
-    dept = (await exception(src, ref.key)) ?? (known.has(guess) ? guess : null)
+    dept = (await exception(treeUrl, ref.key)) ?? (known.has(guess) ? guess : null)
   }
   if (!dept) return null
 
   // TRAP: hive_partitioning = false, or DuckDB reads `dept=09` in the path as
   // a column and the detail view lists a `dept` no file has.
   const rows = await query(
-    `SELECT * FROM read_parquet(${quote(`${tree(src.subdir)}/dpe/dept=${dept}/part-0000.parquet`)},` +
+    `SELECT * FROM read_parquet(${quote(`${treeUrl}/dpe/dept=${dept}/part-0000.parquet`)},` +
       ` hive_partitioning = false) WHERE "${src.key}" = ? LIMIT 1`,
     [ref.key],
   )
-  const row = rows[0]
-  return row ? { row, dept, meta: m.column_meta ?? {} } : null
+  return rows[0] ? { row: rows[0], dept } : null
+}
+
+/**
+ * Every column of one record, read from the one partition that holds it: the
+ * base tree first, then -- for a paid member of a split tree -- the recent one.
+ */
+export async function detail(ref: DetailRef, paid: boolean): Promise<Record_ | null> {
+  const src = SOURCE[ref.source]
+  const m = await manifest(src.subdir)
+  const meta = m.column_meta ?? {}
+  const found = await lookup(src, tree(src.subdir), new Set(m.partitions.map((p) => p.dept)), ref)
+  if (found) return { ...found, meta }
+  if (!paid || !m.recent) return null
+  const known = new Set(m.partitions.filter((p) => p.recent?.rows).map((p) => p.dept))
+  const recent = await lookup(src, recentTree(m), known, ref)
+  return recent ? { ...recent, meta } : null
 }
 
 // --- building and parcel ----------------------------------------------------

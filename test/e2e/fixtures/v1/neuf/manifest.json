@@ -1081,6 +1081,24 @@
         "path": "dpe/dept=09/part-0000.parquet",
         "bytes": 61379,
         "sha256": "a7309ee006d35bf47ee6402a1bb5b39aa51833671d32f36476abe9c49a82fd60"
+      },
+      "recent": {
+        "rows": 0,
+        "search": {
+          "path": "search/dept=09/part-0000.parquet",
+          "bytes": 619,
+          "sha256": "9c9e154626ff9d789242f418a13ac2d80cbe0f4480e632da12f32409289c84d2"
+        },
+        "dpe": {
+          "path": "dpe/dept=09/part-0000.parquet",
+          "bytes": 8960,
+          "sha256": "f782b009bd32f83b6360901f13224bcfdaf3b05b27981694b9885d4dc141824e"
+        }
+      },
+      "counts": {
+        "path": "recent-counts/dept=09/part-0000.parquet",
+        "bytes": 430,
+        "sha256": "8e087f2b4e62c42c77cbc6541dde8f76b84c2853d01070c77f5a20f59a3b7421"
       }
     },
     {
@@ -1091,15 +1109,50 @@
       "rows": 100,
       "search": {
         "path": "search/dept=48/part-0000.parquet",
-        "bytes": 7573,
-        "sha256": "ae201d98437f68b6aa08bfb41d5457d65dbcf53ccd64ef2e19851c9707012a73"
+        "bytes": 7492,
+        "sha256": "e5e69d43954546b48f4817ea01fd9307585cfe17c605b80f96e351415b39daba"
       },
       "dpe": {
         "path": "dpe/dept=48/part-0000.parquet",
-        "bytes": 59522,
-        "sha256": "9a2b061b53d6053aec684097d20c3f20ee908462a87079f978c5fecc21856d05"
+        "bytes": 59090,
+        "sha256": "f11fcf654852c0116150d7755bf84df5a6f009d22091c2c379eadd8820a68afe"
+      },
+      "recent": {
+        "rows": 2,
+        "search": {
+          "path": "search/dept=48/part-0000.parquet",
+          "bytes": 3050,
+          "sha256": "bfc94c8bc4448f1568b5eaf69ac881c40f9100c5edb4d20c12745be9f7ab3914"
+        },
+        "dpe": {
+          "path": "dpe/dept=48/part-0000.parquet",
+          "bytes": 33472,
+          "sha256": "fdea6d51478724a154bacff729115e64e058506ce447e347a4ee270ee1ffbc90"
+        }
+      },
+      "counts": {
+        "path": "recent-counts/dept=48/part-0000.parquet",
+        "bytes": 1737,
+        "sha256": "ee1ada7b3dc10527837eff42d236264e5481f166560e9ff4b76fb9ac6bc294f0"
       }
     }
   ],
-  "sliced_from": "2026-09-11T04:21:29+00:00"
+  "sliced_from": "2026-09-11T04:21:29+00:00",
+  "recent": {
+    "cutoff": "2026-07-07",
+    "date_column": "date_etablissement_dpe",
+    "counts_columns": [
+      "code_postal_ban",
+      "nom_commune_ban",
+      "etiquette_dpe",
+      "etiquette_ges",
+      "date_etablissement_dpe",
+      "surface_habitable_logement",
+      "conso_5_usages_par_m2_ep",
+      "emission_ges_5_usages_par_m2",
+      "type_batiment",
+      "periode_construction"
+    ],
+    "tree": "recent/v1/neuf"
+  }
 }

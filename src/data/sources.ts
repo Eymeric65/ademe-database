@@ -25,6 +25,10 @@ export type Partition = {
   rows: number
   search?: FileRef
   dpe?: FileRef
+  /** This partition's rows in the paid tree, beside it under `recent/` (ADR-0039). */
+  recent?: { rows: number; search: FileRef; dpe: FileRef }
+  /** The recent rows' filter columns only: what a free search counts. */
+  counts?: FileRef
 }
 
 /** A numeric filter: the column, and the SQL that reads it as a number. */
@@ -312,11 +316,15 @@ export function parseDecimal(input: string): number | undefined {
  *
  * The date range compares the DATE column directly: `strftime(col) = ?` hid
  * the column from the row-group statistics, so every search read every group.
+ *
+ * `count` asks the same filter for a number only: it is what runs over the
+ * counts files, which carry the filter columns and nothing else (ADR-0039).
  */
 export function searchQuery(
   src: Source,
   spec: QuerySpec,
   files: string[],
+  shape: 'rows' | 'count' = 'rows',
 ): { sql: string; params: unknown[] } {
   if (!files.length) throw new Error('no partition to search')
   const where: string[] = []
@@ -356,6 +364,12 @@ export function searchQuery(
     add('periode_construction = ?', spec.periodeConstruction)
   }
 
+  const list = files.map((f) => `'${f.replace(/'/g, "''")}'`).join(', ')
+  const filter = `WHERE ${where.length ? where.join(' AND ') : 'TRUE'}`
+  if (shape === 'count') {
+    return { sql: `SELECT count(*) AS n FROM read_parquet([${list}], hive_partitioning = false) ${filter}`, params }
+  }
+
   // Closeness on surface first: an advert rounds, so the nearest area is the
   // likeliest match rather than merely one of the matches.
   let order = `ORDER BY ${src.dateCol} DESC NULLS LAST, ${src.key}`
@@ -364,11 +378,10 @@ export function searchQuery(
     params.push(spec.surface)
   }
 
-  const list = files.map((f) => `'${f.replace(/'/g, "''")}'`).join(', ')
   const sql =
     `SELECT *, count(*) OVER () AS total` +
     ` FROM read_parquet([${list}], hive_partitioning = false, filename = true)` +
-    ` WHERE ${where.length ? where.join(' AND ') : 'TRUE'} ${order} LIMIT ${LIMIT}`
+    ` ${filter} ${order} LIMIT ${LIMIT}`
   return { sql, params }
 }
 

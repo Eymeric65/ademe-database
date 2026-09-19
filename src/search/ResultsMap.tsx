@@ -3,6 +3,7 @@ import 'leaflet/dist/leaflet.css'
 import { useEffect, useRef } from 'react'
 import type { Hit } from '../data/sources'
 import { detailHref } from '../routes'
+import { newerLabel } from './Results'
 
 // see ADR-0037
 const TILES =
@@ -19,11 +20,15 @@ function colour(letter: string | null): string {
   return value || '#9e9e9e'
 }
 
-/** One marker per result that has coordinates; its popup opens the record. */
-export function ResultsMap({ hits }: { hits: Hit[] }) {
+/**
+ * One marker per result that has coordinates; its popup opens the record. A
+ * free member's recent matches have no marker, and a note says how many.
+ */
+export function ResultsMap({ hits, newer, audit }: { hits: Hit[]; newer: number; audit: boolean }) {
   const container = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
   const layer = useRef<L.FeatureGroup | null>(null)
+  const note = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     const el = container.current
@@ -31,6 +36,9 @@ export function ResultsMap({ hits }: { hits: Hit[] }) {
     const m = L.map(el).setView([46.6, 2.4], 5)
     L.tileLayer(TILES, { maxZoom: 19, attribution: ATTRIBUTION }).addTo(m)
     const group = L.featureGroup().addTo(m)
+    const control = new L.Control({ position: 'topright' })
+    control.onAdd = () => (note.current = L.DomUtil.create('div', 'map-recent-note'))
+    control.addTo(m)
     map.current = m
     layer.current = group
     // TRAP: Leaflet measures its container once. The search is hidden while a
@@ -51,8 +59,16 @@ export function ResultsMap({ hits }: { hits: Hit[] }) {
       m.remove()
       map.current = null
       layer.current = null
+      note.current = null
     }
   }, [])
+
+  useEffect(() => {
+    const el = note.current
+    if (!el) return
+    el.hidden = newer === 0
+    el.textContent = `${newerLabel(newer, audit)} non ${audit ? 'affichée' : 'affiché'}${newer > 1 ? 's' : ''} sur la carte`
+  }, [newer, audit])
 
   useEffect(() => {
     const m = map.current
