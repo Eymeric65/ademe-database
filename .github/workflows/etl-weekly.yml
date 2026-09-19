@@ -54,12 +54,22 @@ jobs:
       - name: Install rclone
         run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
 
+      # Into bucket/, shaped like the bucket, then joined into the one whole tree
+      # the delta, reconcile and checks have always read. The recent tree is
+      # absent until the first split run has published it. See ADR-0039.
       - name: Download the published tree
         run: |
-          rclone copy r2:ademe-dpe/v1/search base/v1/search
-          rclone copy r2:ademe-dpe/v1/dpe    base/v1/dpe
-          rclone copy r2:ademe-dpe/v1/index  base/v1/index
-          rclone copyto r2:ademe-dpe/v1/manifest.json base/v1/manifest.json
+          rclone copy r2:ademe-dpe/v1/search bucket/v1/search
+          rclone copy r2:ademe-dpe/v1/dpe    bucket/v1/dpe
+          rclone copy r2:ademe-dpe/v1/index  bucket/v1/index
+          rclone copyto r2:ademe-dpe/v1/manifest.json bucket/v1/manifest.json
+          if [ -n "$(rclone lsf r2:ademe-dpe/recent/v1/manifest.json 2>/dev/null)" ]; then
+            rclone copy r2:ademe-dpe/recent/v1/search bucket/recent/v1/search
+            rclone copy r2:ademe-dpe/recent/v1/dpe    bucket/recent/v1/dpe
+            rclone copy r2:ademe-dpe/recent/v1/index  bucket/recent/v1/index
+          fi
+          uv run python -m ademe.recent join --from bucket --out base --source existant
+          rm -rf bucket
 
       - name: Fetch and merge
         run: |
@@ -79,15 +89,29 @@ jobs:
       - name: Check for a sharp departure
         run: uv run python scripts/check_delta.py --out out --base-url base/v1
 
-      # Data first, manifest LAST. A reader that fetches the manifest and then
-      # the files it names must never be pointed at a file that is not there
-      # yet; the reverse order is a window in which the app is broken.
+      # TRAP: split every week, even when the delta wrote nothing -- rows age out
+      # of the paid window regardless, and a quiet week would otherwise keep them
+      # paid-only. The merged tree when there is one, the joined one when not.
+      - name: Split off the last two months
+        run: |
+          from=out; [ -f out/v1/manifest.json ] || from=base
+          uv run python -m ademe.recent split --from "$from" --out publish --source existant
+          rm -rf base out reconciled
+
+      # The recent tree, then the counts, then the base files, the manifest LAST:
+      # it names the other three, and a reader that fetches it must never be
+      # pointed at a file that is not there yet. See ADR-0039.
       - name: Upload partitions
         run: |
-          rclone copy out/v1/search r2:ademe-dpe/v1/search --checksum
-          rclone copy out/v1/dpe    r2:ademe-dpe/v1/dpe    --checksum
-          rclone copy out/v1/index  r2:ademe-dpe/v1/index  --checksum
-          rclone copyto out/v1/manifest.json r2:ademe-dpe/v1/manifest.json
+          rclone copy publish/recent/v1/search r2:ademe-dpe/recent/v1/search --checksum
+          rclone copy publish/recent/v1/dpe    r2:ademe-dpe/recent/v1/dpe    --checksum
+          rclone copy publish/recent/v1/index  r2:ademe-dpe/recent/v1/index  --checksum
+          rclone copyto publish/recent/v1/manifest.json r2:ademe-dpe/recent/v1/manifest.json
+          rclone copy publish/v1/recent-counts r2:ademe-dpe/v1/recent-counts --checksum
+          rclone copy publish/v1/search r2:ademe-dpe/v1/search --checksum
+          rclone copy publish/v1/dpe    r2:ademe-dpe/v1/dpe    --checksum
+          rclone copy publish/v1/index  r2:ademe-dpe/v1/index  --checksum
+          rclone copyto publish/v1/manifest.json r2:ademe-dpe/v1/manifest.json
 
       # Every other source, after existing housing and one after another: one
       # ADEME stream at a time (CLAUDE.md §11), so never in parallel. A source whose
@@ -97,44 +121,63 @@ jobs:
         id: neuf
         run: |
           if [ -n "$(rclone lsf r2:ademe-dpe/v1/neuf/manifest.json 2>/dev/null)" ]; then
-            rclone copy r2:ademe-dpe/v1/neuf base/v1/neuf
+            rclone copy r2:ademe-dpe/v1/neuf bucket/v1/neuf
+            if [ -n "$(rclone lsf r2:ademe-dpe/recent/v1/neuf/manifest.json 2>/dev/null)" ]; then
+              rclone copy r2:ademe-dpe/recent/v1/neuf bucket/recent/v1/neuf
+            fi
+            uv run python -m ademe.recent join --from bucket --out base --source neuf
+            rm -rf bucket
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::new housing is not published yet; skipped"
           fi
 
       - name: New housing, fetch, merge, reconcile, check
-        id: neuf_delta
         if: steps.neuf.outputs.published == 'true'
         run: |
           uv run python -m ademe.delta --source neuf --base-url base/v1/neuf --out out
-          # Nothing modified this week: no tree was written, and nothing is uploaded.
+          # Nothing modified this week: no tree was written, and the split reads base.
           if [ ! -f out/v1/neuf/manifest.json ]; then exit 0; fi
           uv run python scripts/reconcile.py --source neuf --root out/v1/neuf --out reconciled
           if [ -d reconciled/v1/neuf ]; then rm -rf out/v1/neuf && mv reconciled/v1/neuf out/v1/neuf; fi
           uv run python scripts/check_delta.py --source neuf --out out --base-url base/v1/neuf
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: New housing, split
+        if: steps.neuf.outputs.published == 'true'
+        run: |
+          from=out; [ -f out/v1/neuf/manifest.json ] || from=base
+          uv run python -m ademe.recent split --from "$from" --out publish --source neuf
+          rm -rf base out reconciled
 
       - name: New housing, upload
-        if: steps.neuf_delta.outputs.changed == 'true'
+        if: steps.neuf.outputs.published == 'true'
         run: |
-          rclone copy out/v1/neuf/search r2:ademe-dpe/v1/neuf/search --checksum
-          rclone copy out/v1/neuf/dpe    r2:ademe-dpe/v1/neuf/dpe    --checksum
-          rclone copy out/v1/neuf/index  r2:ademe-dpe/v1/neuf/index  --checksum
-          rclone copyto out/v1/neuf/manifest.json r2:ademe-dpe/v1/neuf/manifest.json
+          rclone copy publish/recent/v1/neuf/search r2:ademe-dpe/recent/v1/neuf/search --checksum
+          rclone copy publish/recent/v1/neuf/dpe    r2:ademe-dpe/recent/v1/neuf/dpe    --checksum
+          rclone copy publish/recent/v1/neuf/index  r2:ademe-dpe/recent/v1/neuf/index  --checksum
+          rclone copyto publish/recent/v1/neuf/manifest.json r2:ademe-dpe/recent/v1/neuf/manifest.json
+          rclone copy publish/v1/neuf/recent-counts r2:ademe-dpe/v1/neuf/recent-counts --checksum
+          rclone copy publish/v1/neuf/search r2:ademe-dpe/v1/neuf/search --checksum
+          rclone copy publish/v1/neuf/dpe    r2:ademe-dpe/v1/neuf/dpe    --checksum
+          rclone copy publish/v1/neuf/index  r2:ademe-dpe/v1/neuf/index  --checksum
+          rclone copyto publish/v1/neuf/manifest.json r2:ademe-dpe/v1/neuf/manifest.json
 
       - name: Tertiary, published?
         id: tertiaire
         run: |
           if [ -n "$(rclone lsf r2:ademe-dpe/v1/tertiaire/manifest.json 2>/dev/null)" ]; then
-            rclone copy r2:ademe-dpe/v1/tertiaire base/v1/tertiaire
+            rclone copy r2:ademe-dpe/v1/tertiaire bucket/v1/tertiaire
+            if [ -n "$(rclone lsf r2:ademe-dpe/recent/v1/tertiaire/manifest.json 2>/dev/null)" ]; then
+              rclone copy r2:ademe-dpe/recent/v1/tertiaire bucket/recent/v1/tertiaire
+            fi
+            uv run python -m ademe.recent join --from bucket --out base --source tertiaire
+            rm -rf bucket
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::the tertiary DPE is not published yet; skipped"
           fi
 
       - name: Tertiary, fetch, merge, reconcile, check
-        id: tertiaire_delta
         if: steps.tertiaire.outputs.published == 'true'
         run: |
           uv run python -m ademe.delta --source tertiaire --base-url base/v1/tertiaire --out out
@@ -142,28 +185,43 @@ jobs:
           uv run python scripts/reconcile.py --source tertiaire --root out/v1/tertiaire --out reconciled
           if [ -d reconciled/v1/tertiaire ]; then rm -rf out/v1/tertiaire && mv reconciled/v1/tertiaire out/v1/tertiaire; fi
           uv run python scripts/check_delta.py --source tertiaire --out out --base-url base/v1/tertiaire
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Tertiary, split
+        if: steps.tertiaire.outputs.published == 'true'
+        run: |
+          from=out; [ -f out/v1/tertiaire/manifest.json ] || from=base
+          uv run python -m ademe.recent split --from "$from" --out publish --source tertiaire
+          rm -rf base out reconciled
 
       - name: Tertiary, upload
-        if: steps.tertiaire_delta.outputs.changed == 'true'
+        if: steps.tertiaire.outputs.published == 'true'
         run: |
-          rclone copy out/v1/tertiaire/search r2:ademe-dpe/v1/tertiaire/search --checksum
-          rclone copy out/v1/tertiaire/dpe    r2:ademe-dpe/v1/tertiaire/dpe    --checksum
-          rclone copy out/v1/tertiaire/index  r2:ademe-dpe/v1/tertiaire/index  --checksum
-          rclone copyto out/v1/tertiaire/manifest.json r2:ademe-dpe/v1/tertiaire/manifest.json
+          rclone copy publish/recent/v1/tertiaire/search r2:ademe-dpe/recent/v1/tertiaire/search --checksum
+          rclone copy publish/recent/v1/tertiaire/dpe    r2:ademe-dpe/recent/v1/tertiaire/dpe    --checksum
+          rclone copy publish/recent/v1/tertiaire/index  r2:ademe-dpe/recent/v1/tertiaire/index  --checksum
+          rclone copyto publish/recent/v1/tertiaire/manifest.json r2:ademe-dpe/recent/v1/tertiaire/manifest.json
+          rclone copy publish/v1/tertiaire/recent-counts r2:ademe-dpe/v1/tertiaire/recent-counts --checksum
+          rclone copy publish/v1/tertiaire/search r2:ademe-dpe/v1/tertiaire/search --checksum
+          rclone copy publish/v1/tertiaire/dpe    r2:ademe-dpe/v1/tertiaire/dpe    --checksum
+          rclone copy publish/v1/tertiaire/index  r2:ademe-dpe/v1/tertiaire/index  --checksum
+          rclone copyto publish/v1/tertiaire/manifest.json r2:ademe-dpe/v1/tertiaire/manifest.json
 
       - name: Energy audits, published?
         id: audit
         run: |
           if [ -n "$(rclone lsf r2:ademe-dpe/v1/audit/manifest.json 2>/dev/null)" ]; then
-            rclone copy r2:ademe-dpe/v1/audit base/v1/audit
+            rclone copy r2:ademe-dpe/v1/audit bucket/v1/audit
+            if [ -n "$(rclone lsf r2:ademe-dpe/recent/v1/audit/manifest.json 2>/dev/null)" ]; then
+              rclone copy r2:ademe-dpe/recent/v1/audit bucket/recent/v1/audit
+            fi
+            uv run python -m ademe.recent join --from bucket --out base --source audit
+            rm -rf bucket
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "::notice::the energy audits are not published yet; skipped"
           fi
 
       - name: Energy audits, fetch, merge, reconcile, check
-        id: audit_delta
         if: steps.audit.outputs.published == 'true'
         run: |
           uv run python -m ademe.delta --source audit --base-url base/v1/audit --out out
@@ -171,19 +229,30 @@ jobs:
           uv run python scripts/reconcile.py --source audit --root out/v1/audit --out reconciled
           if [ -d reconciled/v1/audit ]; then rm -rf out/v1/audit && mv reconciled/v1/audit out/v1/audit; fi
           uv run python scripts/check_delta.py --source audit --out out --base-url base/v1/audit
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Energy audits, split
+        if: steps.audit.outputs.published == 'true'
+        run: |
+          from=out; [ -f out/v1/audit/manifest.json ] || from=base
+          uv run python -m ademe.recent split --from "$from" --out publish --source audit
+          rm -rf base out reconciled
 
       - name: Energy audits, upload
-        if: steps.audit_delta.outputs.changed == 'true'
+        if: steps.audit.outputs.published == 'true'
         run: |
-          rclone copy out/v1/audit/search r2:ademe-dpe/v1/audit/search --checksum
-          rclone copy out/v1/audit/dpe    r2:ademe-dpe/v1/audit/dpe    --checksum
-          rclone copy out/v1/audit/index  r2:ademe-dpe/v1/audit/index  --checksum
-          rclone copyto out/v1/audit/manifest.json r2:ademe-dpe/v1/audit/manifest.json
+          rclone copy publish/recent/v1/audit/search r2:ademe-dpe/recent/v1/audit/search --checksum
+          rclone copy publish/recent/v1/audit/dpe    r2:ademe-dpe/recent/v1/audit/dpe    --checksum
+          rclone copy publish/recent/v1/audit/index  r2:ademe-dpe/recent/v1/audit/index  --checksum
+          rclone copyto publish/recent/v1/audit/manifest.json r2:ademe-dpe/recent/v1/audit/manifest.json
+          rclone copy publish/v1/audit/recent-counts r2:ademe-dpe/v1/audit/recent-counts --checksum
+          rclone copy publish/v1/audit/search r2:ademe-dpe/v1/audit/search --checksum
+          rclone copy publish/v1/audit/dpe    r2:ademe-dpe/v1/audit/dpe    --checksum
+          rclone copy publish/v1/audit/index  r2:ademe-dpe/v1/audit/index  --checksum
+          rclone copyto publish/v1/audit/manifest.json r2:ademe-dpe/v1/audit/manifest.json
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: delta-manifest
-          path: out/v1/manifest.json
+          path: publish/v1/manifest.json
           retention-days: 30
