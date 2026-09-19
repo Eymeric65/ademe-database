@@ -36,6 +36,11 @@ jobs:
       RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      # A piped stdout is block-buffered, and a step killed by the timeout
+      # never flushes: run #2 spent its last 60 minutes printing nothing.
+      PYTHONUNBUFFERED: "1"
+      # Optional; unset is anonymous (ADR-0013), at half the rate.
+      ADEME_API_KEY: ${{ secrets.ADEME_API_KEY }}
     steps:
       # The job holds each published tree it updates, its merge and possibly a
       # reconciled copy: well past the runner's free disk. The toolchains below
