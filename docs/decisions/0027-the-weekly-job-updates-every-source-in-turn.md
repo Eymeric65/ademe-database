@@ -1,14 +1,15 @@
 ---
-status: accepted
+status: superseded
 date: 2026-09-10
 area: data plane
 supersedes:
-superseded-by:
+superseded-by: 0042
 ---
 
 # ADR-0027 — The weekly job updates every ADEME source in turn, in one job
 
-**Status:** accepted · **Decided:** 2026-09-10 · **Area:** data plane
+**Status:** Superseded by [ADR-0042](0042-each-source-is-its-own-weekly-job-one-at-a-time.md) ·
+**Decided:** 2026-09-10 · **Area:** data plane
 
 ## Context and Problem Statement
 
