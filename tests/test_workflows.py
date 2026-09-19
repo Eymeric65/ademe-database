@@ -92,6 +92,16 @@ def test_the_weekly_job_reads_the_published_trees_from_r2_not_the_public_domain(
         assert f'--base-url "{base}"' in text or f"--base-url {base}" in text, f"{slug}: delta not on the R2 copy"
 
 
+def test_the_weekly_job_prints_as_it_goes_and_uses_the_api_key():
+    """Run #2 (2026-09-14) was killed after 60 minutes in which reconcile had
+    printed nothing: Python block-buffers a piped stdout, and a killed process
+    never flushes. And without the key every step ran at ADEME's anonymous
+    rate. Both are job-wide, so every step inherits them."""
+    env = _text().split("\n    env:\n", 1)[1].split("\n    steps:\n", 1)[0]
+    assert re.search(r'^      PYTHONUNBUFFERED: "1"$', env, re.M)
+    assert re.search(r"^      ADEME_API_KEY: \$\{\{ secrets\.ADEME_API_KEY \}\}$", env, re.M)
+
+
 def _upload(text: str, local: str) -> int:
     """Where `publish/<local>` is uploaded; -1 when it never is."""
     line = re.search(rf"rclone copy(?:to)? publish/{re.escape(local)}\s", text)
