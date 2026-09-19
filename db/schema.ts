@@ -43,7 +43,14 @@ export const user = sqliteTable('user', {
   image: text('image'),
   createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(now),
   updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(now),
-}, (t) => [uniqueIndex('user_email_unique').on(t.email)])
+  // TRAP: never register this in Better Auth's `additionalFields`. Unknown to
+  // it, the column is out of reach of sign-up and update-user; known to it,
+  // any caller could make themselves paid. See ADR-0038.
+  plan: text('plan').notNull().default('free'),
+}, (t) => [
+  uniqueIndex('user_email_unique').on(t.email),
+  check('user_plan_known', sql`${t.plan} in ('free', 'paid')`),
+])
 
 export const session = sqliteTable('session', {
   id: text('id').primaryKey(),

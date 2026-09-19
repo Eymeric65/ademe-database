@@ -23,6 +23,7 @@ import {
   ensureMigrated,
   listSavedBuildings,
   listSavedSearches,
+  planOf,
   saveBuilding,
   saveSearch,
   type Caller,
@@ -34,8 +35,11 @@ import { SAVED_SOURCES } from '../db/schema'
  * guards has no owner. That makes it WEAKER than `owner`, so it must never
  * appear on an /api route -- test/unit/authorization.test.ts refuses that
  * outright. See ADR-0012.
+ *
+ * `paid` is `signed-in` plus the caller's plan: data with no owner that only
+ * paid accounts may read. The same test keeps it off /api. See ADR-0038.
  */
-type Scope = 'public' | 'signed-in' | 'self' | 'owner'
+type Scope = 'public' | 'signed-in' | 'paid' | 'self' | 'owner'
 
 export type Route = {
   method: string
@@ -82,7 +86,7 @@ export const ROUTES: Route[] = [
       // here would mean the two disagreed. Fail closed rather than guess.
       if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
       const { id, name, email } = session.user
-      return json({ id, name, email })
+      return json({ id, name, email, plan: await planOf(env, caller) })
     },
   },
 
@@ -192,6 +196,14 @@ export const ROUTES: Route[] = [
     scope: 'signed-in',
     handle: ({ request, env }) => serveObject(request, env, { immutable: false }),
   },
+  // The last two months of certificates, for paid accounts only. Its own
+  // top-level prefix, so no /data/v1/* key can name it. See ADR-0038.
+  {
+    method: 'ANY',
+    path: '/data/recent/*',
+    scope: 'paid',
+    handle: ({ request, env }) => serveObject(request, env, { immutable: false, noStore: true }),
+  },
 ]
 
 /** Bodies are validated by hand; a schema library is not worth a dependency here. */
@@ -227,7 +239,7 @@ function json(body: unknown, status = 200): Response {
 async function serveObject(
   request: Request,
   env: Env,
-  { immutable }: { immutable: boolean },
+  { immutable, noStore = false }: { immutable: boolean; noStore?: boolean },
 ): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return json({ error: 'method not allowed' }, 405)
@@ -245,9 +257,17 @@ async function serveObject(
   // TRAP: `private`, never `public`, on anything gated. A public directive puts
   // one caller's bytes in a shared edge cache, where the next request reads
   // them without ever reaching the gate above.
+  //
+  // TRAP: `no-store` on anything gated by plan. `private` still lets the
+  // browser keep it, and the browser cache is keyed by URL, not by account --
+  // a paid file kept there reaches the next account to sign in on it.
   headers.set(
     'cache-control',
-    immutable ? 'public, max-age=31536000, immutable' : 'private, max-age=300',
+    noStore
+      ? 'no-store'
+      : immutable
+        ? 'public, max-age=31536000, immutable'
+        : 'private, max-age=300',
   )
 
   const asked = parseRange(request.headers.get('range'))
@@ -437,6 +457,10 @@ export default {
       return json({ error: 'unauthorized' }, 401)
     }
     if (!matched) return json({ error: 'not found' }, 404)
+    // see ADR-0038
+    if (matched.route.scope === 'paid' && (await planOf(env, caller)) !== 'paid') {
+      return json({ error: 'forbidden' }, 403)
+    }
 
     return matched.route.handle({ request, env, caller, params: matched.params })
   },
