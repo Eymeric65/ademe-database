@@ -15,7 +15,7 @@ import { env, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { migrate } from '../../db/migrate'
 import { ROUTES } from '../../server/index'
-import { signUp, withCookie } from './helpers'
+import { setPlan, signUp, withCookie } from './helpers'
 
 beforeEach(async () => {
   await migrate(env.DB)
@@ -149,5 +149,43 @@ describe('the gate, walked route by route', () => {
       })
       expect(res.status, `${route.method} ${route.path}`).toBe(401)
     }
+  })
+
+  it('refuses every paid route to a signed-in free account', async () => {
+    const free = await signUp('walk-free@example.test')
+    const paid = ROUTES.filter((r) => r.scope === 'paid')
+    expect(paid.length).toBeGreaterThan(0)
+
+    for (const route of paid) {
+      const path = route.path.replace(/:[^/]+/g, 'some-id')
+      const res = await SELF.fetch(`http://x${path}`, {
+        method: route.method === 'ANY' ? 'GET' : route.method,
+        headers: { cookie: free },
+      })
+      expect(res.status, `${route.method} ${route.path}`).toBe(403)
+    }
+  })
+})
+
+describe('one paid account and one free', () => {
+  /**
+   * The plan is read per caller, not per session or per browser: A being paid
+   * must never lend B the paid tree. See ADR-0038.
+   */
+  it('serves the paid tree to A and refuses it to B', async () => {
+    await env.DATA.put('recent/v1/probe.bin', new Uint8Array(10))
+    const a = await signUp('paid-a@example.test')
+    const b = await signUp('free-b@example.test')
+    await setPlan('paid-a@example.test', 'paid')
+
+    // Every body read: an R2 stream left open fails isolated storage.
+    const status = async (cookie: string) => {
+      const res = await SELF.fetch('http://x/data/recent/v1/probe.bin', withCookie(cookie))
+      await res.arrayBuffer()
+      return res.status
+    }
+    expect(await status(b)).toBe(403)
+    expect(await status(a)).toBe(200)
+    expect(await status(b)).toBe(403)
   })
 })

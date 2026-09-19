@@ -1,4 +1,4 @@
-import { SELF } from 'cloudflare:test'
+import { env, SELF } from 'cloudflare:test'
 
 /**
  * Sign up through the real HTTP surface and return the session cookie.
@@ -24,4 +24,17 @@ export async function signUp(email: string, password = 'correct-horse-battery'):
 
 export function withCookie(cookie: string): RequestInit {
   return { headers: { cookie } }
+}
+
+/**
+ * Move an account between plans the way an operator does: an UPDATE on D1,
+ * because nothing over HTTP can make an account paid. See ADR-0038.
+ */
+export async function setPlan(email: string, plan: string): Promise<void> {
+  const r = await env.DB.prepare('UPDATE user SET plan = ?, updated_at = unixepoch() WHERE email = ?')
+    .bind(plan, email)
+    .run()
+  // An UPDATE that matched nobody would leave the test asserting on a free
+  // account it believes is paid.
+  if (r.meta.changes !== 1) throw new Error(`setPlan matched ${r.meta.changes} rows for ${email}`)
 }

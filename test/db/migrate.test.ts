@@ -70,6 +70,43 @@ describe('migrate', () => {
     ).rejects.toThrow(/CHECK/i)
   })
 
+  it('upgrades a database from before plans: every account is free and keeps its rows', async () => {
+    // What a deployed database holds today: 0000 to 0002, one user and a row
+    // in every table that cascades from it. A table rebuild would drop them.
+    await env.DB.prepare(
+      'CREATE TABLE IF NOT EXISTS _migration (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)',
+    ).run()
+    for (const m of MIGRATIONS.filter((m) => m.name < '0003')) {
+      for (const statement of m.statements) await env.DB.prepare(statement).run()
+      await env.DB.prepare('INSERT INTO _migration (name, applied_at) VALUES (?, 0)').bind(m.name).run()
+    }
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO user (id, name, email) VALUES ('u1', 'u', 'u@example.test')"),
+      env.DB.prepare(
+        "INSERT INTO session (id, token, user_id, expires_at) VALUES ('s1', 't1', 'u1', 4102444800)",
+      ),
+      env.DB.prepare(
+        "INSERT INTO account (id, user_id, account_id, provider_id) VALUES ('a1', 'u1', 'g1', 'google')",
+      ),
+      env.DB.prepare("INSERT INTO saved_building (id, user_id, numero_dpe) VALUES ('b1', 'u1', 'X')"),
+    ])
+
+    expect(await migrate(env.DB)).toContain('0003_user_plan')
+    expect(await env.DB.prepare("SELECT plan FROM user WHERE id = 'u1'").first()).toEqual({ plan: 'free' })
+    for (const table of ['session', 'account', 'saved_building']) {
+      const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id = 'u1'`).first()
+      expect(row, table).toEqual({ n: 1 })
+    }
+  })
+
+  it('refuses a plan outside the list', async () => {
+    await migrate(env.DB)
+    await env.DB.prepare("INSERT INTO user (id, name, email) VALUES ('u1', 'u', 'u@example.test')").run()
+    await expect(
+      env.DB.prepare("UPDATE user SET plan = 'gold' WHERE id = 'u1'").run(),
+    ).rejects.toThrow(/CHECK/i)
+  })
+
   it('really created the schema: a foreign key on saved_building fires', async () => {
     await migrate(env.DB)
     await expect(

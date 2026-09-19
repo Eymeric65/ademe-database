@@ -12,7 +12,7 @@ import { env, SELF } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { migrate } from '../../db/migrate'
 import { authFor } from '../../server/db'
-import { signUp, withCookie } from './helpers'
+import { setPlan, signUp, withCookie } from './helpers'
 
 /**
  * TRAP: migrate explicitly, per test.
@@ -51,6 +51,61 @@ describe('with test credentials enabled', () => {
     expect(asA).toMatchObject({ email: 'a@example.test' })
     expect(asB).toMatchObject({ email: 'b@example.test' })
     expect((asA as { id: string }).id).not.toBe((asB as { id: string }).id)
+  })
+})
+
+describe('the plan', () => {
+  /**
+   * `plan` is a column Better Auth is never told about, so nothing a client
+   * sends through its endpoints can reach it. Registering it in
+   * `additionalFields` would hand every caller a way to make themselves paid.
+   * See ADR-0038.
+   */
+  async function planOf(cookie: string): Promise<unknown> {
+    return ((await (await SELF.fetch('http://x/api/me', withCookie(cookie))).json()) as { plan?: unknown }).plan
+  }
+
+  it('starts every account free, and says so on /api/me', async () => {
+    expect(await planOf(await signUp('new@example.test'))).toBe('free')
+  })
+
+  it('reports a paid account as paid', async () => {
+    const cookie = await signUp('member@example.test')
+    await setPlan('member@example.test', 'paid')
+    expect(await planOf(cookie)).toBe('paid')
+  })
+
+  it('ignores a plan sent with the sign-up', async () => {
+    const res = await SELF.fetch('http://x/api/auth/sign-up/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'greedy@example.test',
+        password: 'correct-horse-battery',
+        name: 'greedy',
+        plan: 'paid',
+      }),
+    })
+    // Accepted, so the field was really offered to Better Auth and dropped.
+    expect(res.status).toBeLessThan(400)
+    expect(
+      await env.DB.prepare("SELECT plan FROM user WHERE email = 'greedy@example.test'").first(),
+    ).toEqual({ plan: 'free' })
+  })
+
+  it('ignores a plan sent to update-user', async () => {
+    const cookie = await signUp('upgrader@example.test')
+    const res = await SELF.fetch('http://x/api/auth/update-user', {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json', origin: 'http://x' },
+      body: JSON.stringify({ name: 'renamed', plan: 'paid' }),
+    })
+    expect(res.status).toBeLessThan(400)
+    // The name landing proves the update ran; the plan staying put is the point.
+    expect(
+      await env.DB.prepare("SELECT name, plan FROM user WHERE email = 'upgrader@example.test'").first(),
+    ).toEqual({ name: 'renamed', plan: 'free' })
+    expect(await planOf(cookie)).toBe('free')
   })
 })
 
