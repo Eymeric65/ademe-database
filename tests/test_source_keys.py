@@ -166,6 +166,8 @@ def test_queries_name_the_sources_own_fields(audit_like, tmp_path, monkeypatch):
 
     def fake_get(_client, url, params=None):
         seen.append((url, dict(params or {})))
+        if url.endswith("/metric_agg"):
+            return Response({"metric": None})
         return Response({"total": 0} if url.endswith("/lines") else ["09"])
 
     monkeypatch.setattr(api, "_get", fake_get)
@@ -185,3 +187,4 @@ def test_queries_name_the_sources_own_fields(audit_like, tmp_path, monkeypatch):
     monkeypatch.setattr(delta.api, "iter_pages", pages)
     delta.fetch_delta(None, "2024-04-01", tmp_path / "d.sqlite", {"column_meta": {}}, source=audit_like)
     assert asked == ["date_derniere_modification:[2024-04-01 TO *]"]
+    assert seen[-1][1] == {"metric": "max", "field": "date_derniere_modification"}

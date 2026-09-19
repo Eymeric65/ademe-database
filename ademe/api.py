@@ -93,6 +93,13 @@ def total(
     return _get(client, f"{source.api}/lines", params).json()["total"]
 
 
+def high_water(client: httpx.Client, *, source: Source = EXISTANT) -> str | None:
+    """The newest modification date the dataset holds now, as ISO. A fetch
+    that starts now sees every row modified up to it. See ADR-0041."""
+    params = {"metric": "max", "field": source.mapping.modified}
+    return _get(client, f"{source.api}/metric_agg", params).json().get("metric")
+
+
 def values(
     client: httpx.Client, field: str, size: int = 1000, *, source: Source = EXISTANT
 ) -> list[str]:

@@ -132,11 +132,12 @@ def test_the_delta_is_fetched_from_the_sources_dataset_into_its_schema(base, sou
         yield Page()
 
     monkeypatch.setattr(delta.api, "iter_pages", pages)
+    monkeypatch.setattr(delta.api, "high_water", lambda _c, *, source=None: fake.sources.append(source))
     manifest = json.loads((base / "manifest.json").read_text())
     path = tmp_path / "fetched.sqlite"
 
     assert delta.fetch_delta(None, "2026-09-01", path, manifest, source=source) == 1
-    assert fake.sources == [source]
+    assert fake.sources == [source, source]
     conn = db.connect(path)
     assert conn.execute("SELECT dataset FROM data_source").fetchone()[0] == "neuf-like"
     columns = {r[0] for r in conn.execute("SELECT column_name FROM column_meta")}

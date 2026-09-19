@@ -87,7 +87,8 @@ def bookkeeping_ddl() -> list[str]:
     rows_loaded      INTEGER NOT NULL DEFAULT 0,
     next_cursor      TEXT,
     started_at       TEXT,
-    completed_at     TEXT
+    completed_at     TEXT,
+    upstream_high_water TEXT
 ) WITHOUT ROWID""",
         # A value that does not round-trip at its declared scale is stored raw
         # here rather than silently rounded. Expected to stay empty; if it does
