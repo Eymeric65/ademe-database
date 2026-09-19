@@ -9,11 +9,12 @@ files being readable.
 from __future__ import annotations
 
 import json
+from datetime import date
 
 import duckdb
 import pytest
 
-from ademe import db, delta, export_parquet, ingest, schema, spec
+from ademe import db, delta, export_parquet, ingest, recent, schema, spec
 
 SCALES = {
     "conso_5_usages_par_m2_ep": 10,
@@ -437,3 +438,274 @@ def test_the_id_pull_agrees_with_the_total_upstream():
     assert reported > 0
     assert len(ids) == reported, f"total says {reported}, the id pull returned {len(ids)}"
     assert len(set(ids)) == len(ids), "upstream returned a duplicate numero_dpe"
+
+
+# --- the paid window: split and join (ADR-0039) ------------------------------
+
+CUTOFF = date(2026, 7, 19)
+
+
+def _keys(path, column: str = "numero_dpe") -> set:
+    return {
+        r[0]
+        for r in duckdb.connect()
+        .execute(f"SELECT {column} FROM read_parquet('{path}', hive_partitioning = false)")
+        .fetchall()
+    }
+
+
+def _rows(path) -> list[tuple]:
+    """Every row of a file, in a stable order: a search file's sort has ties."""
+    return sorted(
+        duckdb.connect()
+        .execute(f"SELECT * FROM read_parquet('{path}', hive_partitioning = false)")
+        .fetchall(),
+        key=repr,
+    )
+
+
+def _file(tree, kind, dept):
+    return tree / kind / f"dept={dept}" / "part-0000.parquet"
+
+
+@pytest.fixture
+def whole(tmp_path):
+    """One unsplit tree whose dates straddle CUTOFF, at ROOT/v1."""
+    rows = [
+        _row("2409E0000001", "09", "2026-08-01", date_etablissement_dpe="2026-05-01"),
+        _row("2409E0000002", "09", "2026-08-01", date_etablissement_dpe="2026-07-19"),  # on the cutoff
+        _row("2409E0000003", "09", "2026-08-01", date_etablissement_dpe="2026-07-18"),  # the day before
+        _row("2409E0000004", "09", "2026-08-01", date_etablissement_dpe=""),  # no date
+        _row("2409E0000005", "09", "2026-08-02", date_etablissement_dpe="2026-09-01"),
+        # Numeros that disagree with their partition: one each side of the cutoff.
+        _row("2475E0000001", "09", "2026-08-01", date_etablissement_dpe="2026-08-10"),
+        _row("2476E0000001", "09", "2026-08-01", date_etablissement_dpe="2026-01-10"),
+        # A partition that is recent through and through.
+        _row("2431E0000001", "31", "2026-08-01", date_etablissement_dpe="2026-08-01"),
+    ]
+    path, conn = _build(tmp_path, "whole", rows)
+    root = tmp_path / "whole"
+    export_parquet.export(path, root)
+    conn.close()
+    # A value the scale could not hold, on either side of the cutoff.
+    index = root / export_parquet.VERSION / "index"
+    duckdb.connect().execute(
+        "COPY (SELECT * FROM (VALUES"
+        " ('2409E0000001', 'surface_habitable_logement', '78.55'),"
+        " ('2409E0000005', 'surface_habitable_logement', '78.55')"
+        ") t(numero_dpe, column_name, raw_value))"
+        f" TO '{index / 'scale-violation.parquet'}' (FORMAT parquet)"
+    )
+    return root
+
+
+RECENT_09 = {"2409E0000002", "2409E0000005", "2475E0000001"}
+BASE_09 = {"2409E0000001", "2409E0000003", "2409E0000004", "2476E0000001"}
+
+
+def test_every_row_lands_on_exactly_one_side(whole, tmp_path):
+    """On the cutoff day is recent; the day before is not; a row with no date
+    is never recent, since nothing says it is."""
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    base, paid = out / "v1", out / "recent" / "v1"
+
+    for kind in ("dpe", "search"):
+        assert _keys(_file(base, kind, "09")) == BASE_09, kind
+        assert _keys(_file(paid, kind, "09")) == RECENT_09, kind
+        assert _keys(_file(base, kind, "31")) == set(), kind
+        assert _keys(_file(paid, kind, "31")) == {"2431E0000001"}, kind
+
+
+def test_the_base_tree_holds_nothing_on_or_after_the_cutoff(whole, tmp_path):
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    for kind in ("dpe", "search"):
+        latest = duckdb.connect().execute(
+            "SELECT max(date_etablissement_dpe) FROM"
+            f" read_parquet('{out}/v1/{kind}/*/*.parquet', hive_partitioning = false)"
+        ).fetchone()[0]
+        assert latest < CUTOFF, kind
+
+
+def test_the_counts_file_carries_the_filters_and_nothing_that_names_a_row(whole, tmp_path):
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    date_col, columns = export_parquet.RECENT["existant"]
+    for dept, n in (("09", len(RECENT_09)), ("31", 1)):
+        counts = out / "v1" / "recent-counts" / f"dept={dept}" / "part-0000.parquet"
+        assert _physical_columns(counts) == list(columns)
+        assert not {"numero_dpe", "adresse_ban", "lat", "lon"} & set(columns)
+        assert len(_rows(counts)) == n
+        assert duckdb.connect().execute(
+            f"SELECT min({date_col}) FROM read_parquet('{counts}')"
+        ).fetchone()[0] >= CUTOFF
+
+
+def test_the_indexes_follow_their_key(whole, tmp_path):
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    base, paid = out / "v1" / "index", out / "recent" / "v1" / "index"
+    assert _keys(base / "numero-exceptions.parquet") == {"2476E0000001"}
+    assert _keys(paid / "numero-exceptions.parquet") == {"2475E0000001"}
+    assert _keys(base / "scale-violation.parquet") == {"2409E0000001"}
+    assert _keys(paid / "scale-violation.parquet") == {"2409E0000005"}
+
+
+def test_the_manifest_records_both_sides_and_their_checksums(whole, tmp_path):
+    out = tmp_path / "publish"
+    before = json.loads((whole / "v1" / "manifest.json").read_text())
+    m = recent.split(whole, out, CUTOFF)
+    assert json.loads((out / "v1" / "manifest.json").read_text()) == m
+    assert m["recent"] == {
+        "cutoff": "2026-07-19",
+        "date_column": "date_etablissement_dpe",
+        "counts_columns": list(export_parquet.RECENT["existant"][1]),
+        "tree": "recent/v1",
+    }
+    assert m["high_water"] == before["high_water"]
+    # `rows` stays the whole: reconcile and check_delta compare it to ADEME.
+    assert {p["dept"]: p["rows"] for p in m["partitions"]} == {"09": 7, "31": 1}
+    assert {p["dept"]: p["recent"]["rows"] for p in m["partitions"]} == {"09": 3, "31": 1}
+    for p in m["partitions"]:
+        for tree, entry in (
+            (out / "v1", p["search"]),
+            (out / "v1", p["dpe"]),
+            (out / "v1", p["counts"]),
+            (out / "recent" / "v1", p["recent"]["search"]),
+            (out / "recent" / "v1", p["recent"]["dpe"]),
+        ):
+            path = tree / entry["path"]
+            assert entry["sha256"] == export_parquet._sha256(path), entry["path"]
+            assert entry["bytes"] == path.stat().st_size, entry["path"]
+
+
+def test_every_file_is_written_even_when_it_is_empty(whole, tmp_path):
+    """`rclone copy` never deletes: a partition whose last recent row aged out
+    would otherwise keep last week's recent file, and serve it."""
+    out = tmp_path / "publish"
+    recent.split(whole, out, date(2027, 1, 1))
+    for dept in ("09", "31"):
+        for kind in ("dpe", "search"):
+            assert _rows(_file(out / "recent" / "v1", kind, dept)) == []
+        assert _rows(out / "v1" / "recent-counts" / f"dept={dept}" / "part-0000.parquet") == []
+    assert (out / "recent" / "v1" / "manifest.json").exists()
+
+
+def test_a_split_tree_is_refused(whole, tmp_path):
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    with pytest.raises(ValueError, match="already split"):
+        recent.split(out, tmp_path / "again", CUTOFF)
+    assert not (tmp_path / "again").exists()
+
+
+def test_join_undoes_split(whole, tmp_path):
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    joined = tmp_path / "joined"
+    recent.join(out, joined)
+
+    for dept in ("09", "31"):
+        for kind in ("dpe", "search"):
+            assert _rows(_file(joined / "v1", kind, dept)) == _rows(_file(whole / "v1", kind, dept))
+    for name in ("numero-exceptions.parquet", "scale-violation.parquet"):
+        assert _rows(joined / "v1" / "index" / name) == _rows(whole / "v1" / "index" / name)
+    assert not (joined / "v1" / "recent-counts").exists()
+
+    def shape(m):
+        return {
+            **{k: v for k, v in m.items() if k != "partitions"},
+            "partitions": [
+                {k: v for k, v in p.items() if k not in ("search", "dpe")} for p in m["partitions"]
+            ],
+        }
+
+    before = json.loads((whole / "v1" / "manifest.json").read_text())
+    after = json.loads((joined / "v1" / "manifest.json").read_text())
+    assert shape(after) == shape(before)
+    for p in after["partitions"]:
+        for kind in ("search", "dpe"):
+            assert p[kind]["sha256"] == export_parquet._sha256(joined / "v1" / p[kind]["path"])
+
+
+def test_join_copies_a_tree_that_was_never_split(whole, tmp_path):
+    """The first weekly run after rollout reads the unsplit production trees."""
+    joined = tmp_path / "joined"
+    recent.join(whole, joined)
+    for rel in (
+        "manifest.json",
+        "dpe/dept=09/part-0000.parquet",
+        "search/dept=31/part-0000.parquet",
+        "index/scale-violation.parquet",
+        "index/numero-exceptions.parquet",
+    ):
+        assert (joined / "v1" / rel).read_bytes() == (whole / "v1" / rel).read_bytes(), rel
+
+
+def test_join_refuses_a_tree_missing_rows(whole, tmp_path):
+    """A recent file that did not download joins to a smaller tree, which the
+    delta would then publish as the whole."""
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    m = json.loads((out / "v1" / "manifest.json").read_text())
+    m["partitions"][0]["rows"] += 1
+    (out / "v1" / "manifest.json").write_text(json.dumps(m))
+    with pytest.raises(ValueError, match="dept=09"):
+        recent.join(out, tmp_path / "joined")
+
+
+def test_a_later_cutoff_moves_rows_back_into_the_base(whole, tmp_path):
+    first = tmp_path / "first"
+    recent.split(whole, first, CUTOFF)
+    joined = tmp_path / "joined"
+    recent.join(first, joined)
+    second = tmp_path / "second"
+    recent.main(["split", "--from", str(joined), "--out", str(second), "--cutoff", "2026-08-15"])
+
+    assert _keys(_file(second / "recent" / "v1", "dpe", "09")) == {"2409E0000005"}
+    assert _keys(_file(second / "v1", "dpe", "09")) == BASE_09 | {"2409E0000002", "2475E0000001"}
+    assert _keys(_file(second / "v1", "dpe", "31")) == {"2431E0000001"}
+
+
+def test_a_changed_recent_row_stays_recent_through_the_weekly_pass(whole, tmp_path):
+    """join -> merge -> split, as the weekly job will run it."""
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    joined = tmp_path / "joined"
+    recent.join(out, joined)
+
+    dpath, dconn = _build(
+        tmp_path,
+        "delta",
+        [_row("2409E0000005", "09", "2026-09-03", date_etablissement_dpe="2026-09-01", etiquette_dpe="A")],
+    )
+    export_parquet.export(dpath, tmp_path / "delta-out")
+    dconn.close()
+    merged = tmp_path / "merged"
+    delta.merge(joined / "v1", tmp_path / "delta-out" / "v1", merged / "v1")
+
+    again = tmp_path / "again"
+    m = recent.split(merged, again, CUTOFF)
+    assert m["high_water"] == "2026-09-03"
+    got = duckdb.connect().execute(
+        "SELECT numero_dpe, etiquette_dpe FROM"
+        f" read_parquet('{_file(again / 'recent' / 'v1', 'dpe', '09')}') ORDER BY numero_dpe"
+    ).fetchall()
+    assert got == [("2409E0000002", "D"), ("2409E0000005", "A"), ("2475E0000001", "D")]
+    assert "2409E0000005" not in _keys(_file(again / "v1", "dpe", "09"))
+
+
+@pytest.mark.parametrize(
+    "day, cutoff",
+    [
+        (date(2026, 9, 19), date(2026, 7, 19)),
+        (date(2026, 1, 15), date(2025, 11, 15)),  # across a year
+        (date(2026, 4, 30), date(2026, 2, 28)),  # no 30 February
+        (date(2024, 4, 30), date(2024, 2, 29)),  # a leap year
+        (date(2026, 5, 31), date(2026, 3, 31)),
+        (date(2026, 3, 1), date(2026, 1, 1)),
+    ],
+)
+def test_the_cutoff_counts_back_calendar_months(day, cutoff):
+    assert recent.cutoff_for(day) == cutoff

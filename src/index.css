@@ -764,6 +764,62 @@ h1 {
   }
 }
 
+/* --- the last two months, for paid members (ADR-0039) ------------------- */
+
+/*
+ * Placeholder rows under a blur, the count printed across them. Nothing under
+ * the blur is data; it only says where the rows would be.
+ */
+.recent-locked {
+  position: relative;
+  display: grid;
+  border-top: 1px solid var(--color-border);
+}
+
+.recent-locked-rows {
+  grid-area: 1 / 1;
+  filter: blur(5px);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}
+
+.recent-locked-rows .hit:first-child {
+  border-top: 0;
+}
+
+.recent-locked-note {
+  grid-area: 1 / 1;
+  place-self: center;
+  /* TRAP: the rows' opacity paints them as a positioned layer, over any
+     sibling that is not positioned -- this note included. */
+  position: relative;
+  z-index: 1;
+  margin: 1rem;
+  padding: 0.7rem 1rem;
+  max-width: 26rem;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+}
+
+.map-recent-note {
+  max-width: 14rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
 /*
  * The source tabs: four radios printed as index tabs along the card's top
  * edge. A radio underneath, so the keyboard and a screen reader get a group
@@ -1106,14 +1162,505 @@ h1 {
   font-family: var(--font-mono);
 }
 
+/* --- présentation -------------------------------------------------------- */
+
+/*
+ * A report, set like the certificate it is about: a hero with one specimen,
+ * then sections that each open on the masthead's two-plate rule, heading in the
+ * left margin, matter on the right. The specimen is the one loud thing.
+ */
+.pres-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: center;
+  gap: clamp(2rem, 5vw, 4.5rem);
+  min-height: max(24rem, calc(100dvh - 11.5rem));
+  padding-bottom: 3rem;
+}
+
+.pres-hero h1 {
+  max-width: 15ch;
+}
+
+/* One sentence per block: the headline is the contrast between the two. */
+.pres-hero h1 span {
+  display: block;
+}
+
+.pres-hero .actions {
+  margin: 1.75rem 0 0;
+}
+
+a.signin {
+  text-decoration: none;
+}
+
+.pres-section {
+  display: grid;
+  grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
+  gap: 1.5rem clamp(2rem, 5vw, 4rem);
+  padding: 3rem 0 3.5rem;
+  border-top: 1px solid color-mix(in oklab, var(--color-text) 55%, transparent);
+  box-shadow: inset 0 2px 0 -1px var(--color-accent);
+}
+
+.pres-section > header {
+  align-self: start;
+  position: sticky;
+  top: 5.5rem;
+}
+
+.pres-section h2 {
+  margin: 0 0 0.6rem;
+  font-size: clamp(1.45rem, 1.15rem + 1vw, 1.9rem);
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+.pres-section > header p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.95rem;
+}
+
+.pres-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.pres-section p {
+  margin: 0;
+}
+
+/* The ledger: what the listing prints, against what the certificate holds. */
+.pres-ledger {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.pres-ledger thead th {
+  padding: 0 1rem 0.6rem;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
+}
+
+.pres-ledger thead th:last-child {
+  color: var(--color-accent);
+}
+
+.pres-ledger tbody th,
+.pres-ledger tbody td {
+  padding: 0.85rem 1rem;
+  vertical-align: top;
+  text-align: left;
+  border-top: 1px solid var(--color-border);
+}
+
+.pres-ledger tbody th {
+  padding-left: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.02rem;
+  white-space: nowrap;
+}
+
+.pres-ledger td.ad {
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+/* The column the product exists for, printed on a tint of the accent plate. */
+.pres-ledger td:last-child,
+.pres-ledger thead th:last-child {
+  background: color-mix(in srgb, var(--color-accent-soft) 60%, transparent);
+}
+
+.pres-ledger td:last-child {
+  font-weight: 550;
+}
+
+/* A sequence, so it is numbered. */
+.pres-steps {
+  counter-reset: step;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+}
+
+.pres-steps li {
+  counter-increment: step;
+  padding-top: 0.9rem;
+  border-top: 2px solid var(--color-accent);
+}
+
+.pres-steps li::before {
+  content: counter(step);
+  display: block;
+  margin-bottom: 0.6rem;
+  font-family: var(--font-display);
+  font-size: 2.4rem;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--color-accent);
+}
+
+.pres-steps p,
+.pres-uses p {
+  color: var(--color-muted);
+  font-size: 0.95rem;
+}
+
+.pres-sources {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 2rem;
+}
+
+.pres-sources div {
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.pres-sources dt {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.pres-sources dd {
+  margin: 0.15rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.93rem;
+}
+
+.pres-uses {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.75rem 2rem;
+}
+
+.pres-limits {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.9rem;
+  max-width: 60ch;
+}
+
+.pres-limits li {
+  padding-left: 1rem;
+  border-left: 2px solid var(--color-border);
+}
+
+.pres-close {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem 2rem;
+  margin-top: 1rem;
+  padding: 2.25rem clamp(1.25rem, 4vw, 2.5rem);
+  border-radius: var(--radius);
+  background: var(--color-accent-soft);
+}
+
+.pres-close p {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.3rem, 1.1rem + 0.9vw, 1.7rem);
+  line-height: 1.2;
+  max-width: 24ch;
+}
+
+/*
+ * The specimen: an invented listing and the certificate behind it, stacked in
+ * one grid cell so the certificate overlaps the listing like a sheet laid on
+ * top of it. The yellow D is the only thing the two share.
+ */
+.specimen {
+  position: relative;
+  display: grid;
+  margin: 0;
+  padding-bottom: 1.5rem;
+}
+
+.spec-ad,
+.spec-dpe {
+  grid-area: 1 / 1;
+  border-radius: var(--radius);
+}
+
+.spec-ad {
+  justify-self: start;
+  align-self: start;
+  width: 56%;
+  padding: 0.7rem 0.7rem 0.9rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: 4px 4px 0 0 color-mix(in oklab, var(--color-text) 10%, transparent);
+  transform: rotate(-2deg);
+}
+
+:where(.spec-ad, .spec-dpe) p {
+  margin: 0;
+}
+
+.spec-photo {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  aspect-ratio: 16 / 10;
+  margin-bottom: 0.6rem;
+  border-radius: var(--radius-tight);
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--color-border) 0 1px,
+    transparent 1px 7px
+  );
+}
+
+.spec-photo svg {
+  width: 70%;
+  fill: none;
+  stroke: var(--color-muted);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.spec-price {
+  font-family: var(--font-display);
+  font-weight: 620;
+  font-size: 1.2rem;
+}
+
+.spec-title {
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.spec-town {
+  font-size: 0.8rem;
+  color: var(--color-muted);
+}
+
+.spec-grade {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.55rem 0;
+  font-size: 0.75rem;
+  color: var(--color-muted);
+}
+
+.spec-grade .badge {
+  width: 1.4rem;
+  height: 1.4rem;
+  font-size: 0.8rem;
+}
+
+.spec-hidden {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--color-muted);
+}
+
+/* The address line, blacked out the way the listing leaves it. */
+.redact {
+  display: block;
+  width: 7.5rem;
+  height: 0.62rem;
+  border-radius: 1px;
+  background: color-mix(in oklab, var(--color-text) 78%, transparent);
+}
+
+.spec-dpe {
+  justify-self: end;
+  align-self: end;
+  width: 60%;
+  margin-top: 5.5rem;
+  padding: 0.95rem 1rem 1rem;
+  background: var(--color-bg);
+  border: 1px solid color-mix(in oklab, var(--color-text) 55%, transparent);
+  box-shadow: 6px 6px 0 0 var(--stamp);
+  transform: rotate(1.25deg);
+}
+
+.spec-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.6rem;
+  border-bottom: 1px solid var(--color-border);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--color-muted);
+}
+
+.spec-num {
+  color: var(--color-accent);
+}
+
+.spec-address {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1rem;
+  line-height: 1.25;
+  margin-bottom: 0.7rem;
+}
+
+.spec-ramp {
+  list-style: none;
+  margin: 0 0 0.8rem;
+  padding: 0;
+  display: grid;
+  gap: 0.16rem;
+}
+
+.spec-ramp .rung {
+  display: flex;
+  justify-content: space-between;
+  min-width: 2.2rem;
+  padding: 0.08rem 0.9rem 0.08rem 0.45rem;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.spec-value {
+  font-weight: 600;
+}
+
+/* Wraps rather than overflows: just above 46rem the card is at its narrowest. */
+.spec-facts {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+}
+
+.spec-facts dt {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: var(--color-muted);
+}
+
+.spec-facts dd {
+  margin: 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.specimen figcaption {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--color-muted);
+}
+
+@media (max-width: 46rem) {
+  .pres-hero {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+  .pres-section {
+    grid-template-columns: 1fr;
+    padding: 2.5rem 0 3rem;
+  }
+  .pres-section > header {
+    position: static;
+  }
+  .pres-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 40rem) {
+  .pres-sources,
+  .pres-uses {
+    grid-template-columns: 1fr;
+  }
+  /* Side by side the two sheets would bury the listing; on a phone the
+     certificate is laid under it, overlapping only its bottom edge. */
+  .specimen {
+    display: flex;
+    flex-direction: column;
+  }
+  .spec-ad {
+    width: 82%;
+  }
+  .spec-photo {
+    aspect-ratio: 16 / 7;
+  }
+  .spec-dpe {
+    width: 90%;
+    margin-top: -0.9rem;
+    margin-bottom: 0.5rem;
+  }
+  /* Three columns do not fit a phone: each row becomes its label, then the
+     listing's answer beside the certificate's. */
+  .pres-ledger thead {
+    display: none;
+  }
+  .pres-ledger tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-top: 1px solid var(--color-border);
+    padding: 0.8rem 0;
+  }
+  .pres-ledger tbody th {
+    grid-column: 1 / -1;
+    border: 0;
+    padding: 0 0 0.4rem;
+  }
+  .pres-ledger tbody td {
+    border: 0;
+    padding: 0.5rem 0.7rem;
+  }
+  .pres-ledger tbody td.ad {
+    padding-left: 0;
+  }
+  .pres-ledger tbody td::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-mono);
+    font-style: normal;
+    font-weight: 600;
+    font-size: 0.66rem;
+    color: var(--color-muted);
+  }
+}
+
 /* --- motion -------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
-    transition: none !important;
-    animation: none !important;
+    transition: none;
+    animation: none;
   }
   .signin:hover:not([disabled]),
   .signin:active:not([disabled]) {

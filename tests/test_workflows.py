@@ -57,8 +57,10 @@ def test_each_source_is_reconciled_and_checked_before_it_is_uploaded():
             f"ademe.delta --source {slug}",
             f"scripts/reconcile.py --source {slug}",
             f"scripts/check_delta.py --source {slug}",
-            f"rclone copy out/v1/{sub}/search",
+            f"rclone copy publish/recent/v1/{sub}/search",
         ]
+        missing = [s for s in steps if s not in text]
+        assert not missing, f"{slug}: {missing}"
         where = [text.index(s) for s in steps]
         assert where == sorted(where), slug
 
@@ -81,18 +83,98 @@ def test_the_weekly_job_reads_the_published_trees_from_r2_not_the_public_domain(
             if slug == "existant"
             else text.index(f"ademe.delta --source {slug}")
         )
-        fetch = re.search(rf"rclone copy(?:to)? r2:ademe-dpe/v1/{re.escape(sub)}\S* {re.escape(base)}", text)
+        bucket = f"bucket/v1/{sub}".rstrip("/")
+        fetch = re.search(rf"rclone copy(?:to)? r2:ademe-dpe/v1/{re.escape(sub)}\S* {re.escape(bucket)}", text)
         assert fetch and fetch.start() < delta, f"{slug}: no download from R2 before its delta"
+        # The download is joined back into the whole tree the delta reads (ADR-0039).
+        join = text.find(f"ademe.recent join --from bucket --out base --source {slug}")
+        assert fetch.start() < join < delta, f"{slug}: the download is not joined into base before its delta"
         assert f'--base-url "{base}"' in text or f"--base-url {base}" in text, f"{slug}: delta not on the R2 copy"
 
 
+def _upload(text: str, local: str) -> int:
+    """Where `publish/<local>` is uploaded; -1 when it never is."""
+    line = re.search(rf"rclone copy(?:to)? publish/{re.escape(local)}\s", text)
+    return line.start() if line else -1
+
+
 def test_each_source_uploads_its_manifest_after_its_files():
+    """The recent tree, then the counts, then the base files, the base manifest
+    LAST: it names the other three, and a reader must never be pointed at a file
+    that is not there yet. See ADR-0039."""
     text = _text()
     for sub in ["", *(f"{SOURCES[s].subdir}/" for s in _others())]:
-        manifest = text.index(f"rclone copyto out/v1/{sub}manifest.json r2:ademe-dpe/v1/{sub}manifest.json")
-        for kind in ("search", "dpe", "index"):
-            line = re.search(rf"rclone copy out/v1/{re.escape(sub)}{kind}\s", text)
-            assert line and line.start() < manifest, f"{sub or 'v1/'}{kind}"
+        stages = [
+            [f"recent/v1/{sub}{kind}" for kind in ("search", "dpe", "index", "manifest.json")],
+            [f"v1/{sub}recent-counts"],
+            [f"v1/{sub}{kind}" for kind in ("search", "dpe", "index")],
+            [f"v1/{sub}manifest.json"],
+        ]
+        where = [[_upload(text, local) for local in stage] for stage in stages]
+        never = [local for stage, at in zip(stages, where) for local, i in zip(stage, at) if i < 0]
+        assert not never, f"{sub or 'v1/'}: never uploaded: {never}"
+        for before, after in zip(where, where[1:]):
+            assert max(before) < min(after), f"{sub or 'v1/'}: uploaded out of order: {stages}"
+
+
+def _delta_at(text: str, slug: str) -> int:
+    return text.find("uv run python -m ademe.delta \\" if slug == "existant" else f"ademe.delta --source {slug}")
+
+
+def test_each_source_is_joined_after_its_recent_download_and_split_before_its_upload():
+    """The delta, reconcile and checks run on the whole tree, so the paid tree is
+    joined back in first; nothing is published until it is split out again. A
+    recent row uploaded unsplit would be in `v1/`, which every signed-in caller
+    reads. See ADR-0039."""
+    text = _text()
+    for slug in SOURCES:
+        sub = SOURCES[slug].subdir
+        recent = f"recent/v1/{sub}".rstrip("/")
+        fetch = re.search(rf"rclone copy r2:ademe-dpe/{re.escape(recent)}\S* bucket/{re.escape(recent)}", text)
+        join = re.search(rf"ademe\.recent join --from bucket --out base --source {slug}\s*$", text, re.M)
+        split = re.search(rf"ademe\.recent split\b.* --out publish --source {slug}\s*$", text, re.M)
+        assert fetch, f"{slug}: its recent tree is never downloaded"
+        assert join, f"{slug}: never joined"
+        assert split, f"{slug}: never split"
+        prefix = f"{sub}/" if sub else ""
+        uploads = [
+            m.start()
+            for m in re.finditer(
+                rf"rclone copy(?:to)? publish/(?:recent/)?v1/{re.escape(prefix)}"
+                r"(?:search|dpe|index|recent-counts|manifest\.json)\s",
+                text,
+            )
+        ]
+        assert uploads, f"{slug}: never uploaded"
+        order = [fetch.start(), join.start(), _delta_at(text, slug), split.start(), min(uploads)]
+        assert order == sorted(order), f"{slug}: not download < join < delta < split < upload: {order}"
+
+
+def test_every_upload_is_from_the_split_tree_to_the_same_path():
+    """`publish/` mirrors the bucket, so a file lands at the key it was split to:
+    recent files only ever under `recent/`, and nothing unsplit is published."""
+    uploads = re.findall(r"rclone copy(?:to)? (\S+)\s+r2:ademe-dpe/(\S+)", _text())
+    assert uploads, "the weekly job uploads nothing"
+    wrong = [(local, remote) for local, remote in uploads if local != f"publish/{remote}"]
+    assert not wrong, f"uploaded from somewhere other than its split path: {wrong}"
+
+
+def test_a_source_is_split_and_uploaded_even_when_nothing_changed():
+    """TRAP: rows age out of the paid window every week whether or not ADEME
+    changed anything. A split or an upload gated on the delta would leave them
+    paid-only for as long as the source stays quiet."""
+    steps = re.split(r"^      - ", _text(), flags=re.M)[1:]
+    n = sum("ademe.recent split" in step for step in steps)
+    assert n == len(SOURCES), f"{n} split step(s) for {len(SOURCES)} sources"
+    for step in steps:
+        splits = "ademe.recent split" in step
+        if not (splits or re.search(r"rclone copy(?:to)? publish/", step)):
+            continue
+        guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
+        assert not (guard and "changed" in guard.group(1)), f"gated on a change: {step.splitlines()[0]}"
+        if splits:
+            head = step[: step.index("ademe.recent split")]
+            assert "exit 0" not in head, f"a quiet week exits before the split: {step.splitlines()[0]}"
 
 
 # CI deploys what it has just tested: dev to the stable preview host, main to

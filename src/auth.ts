@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from './api'
 
-export type Account = { id: string; name: string; email: string }
+/** `plan` is set on D1 by hand; only 'paid' reads the last two months (ADR-0038). */
+export type Account = { id: string; name: string; email: string; plan: 'free' | 'paid' }
 
 /**
  * Who is signed in, from /api/me.

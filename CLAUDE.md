@@ -6,8 +6,9 @@ wrong even if it works.
 This project is two applications that share a repository and nothing else:
 
 - **The data plane** — public ADEME DPE data, published as Parquet on R2 and read by the browser
-  through the Worker's `/data/*` route, which requires a session but scopes nothing: no row has an
-  owner. Built by the Python ETL in `ademe/`. See ADR-0012.
+  through the Worker's `/data/*` route, which requires a session but scopes nothing except the paid
+  `recent/` tree: no row has an owner. Built by the Python ETL in `ademe/`. See ADR-0012 and
+  ADR-0038.
 - **The app plane** — a Cloudflare Worker with D1 holding accounts, saved buildings and saved
   searches. Everything here has an owner and every read must be scoped to it.
 

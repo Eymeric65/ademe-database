@@ -3,13 +3,16 @@ import { useSession } from './auth'
 import { parse, useRoute } from './routes'
 import { search, type Hit } from './data/duck'
 import { Detail } from './detail/Detail'
+import { Presentation } from './presentation/Presentation'
 import { Saved } from './saved/Saved'
 import { Results } from './search/Results'
 import { SearchForm } from './search/SearchForm'
 import type { QuerySpec } from './search/spec'
 
-function Search() {
+function Search({ paid }: { paid: boolean }) {
   const [hits, setHits] = useState<Hit[]>([])
+  const [newer, setNewer] = useState(0)
+  const [audit, setAudit] = useState(false)
   const [ran, setRan] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -18,7 +21,10 @@ function Search() {
     setBusy(true)
     setError(null)
     try {
-      setHits(await search(spec))
+      const found = await search(spec, paid)
+      setHits(found.hits)
+      setNewer(found.newer)
+      setAudit(spec.source === 'audit')
       setRan(true)
     } catch (err) {
       // The data plane is a set of files on another origin. When it is
@@ -39,7 +45,7 @@ function Search() {
       </p>
       <SearchForm onSearch={(spec) => void run(spec)} busy={busy} />
       {error ? <p className="error">Les données sont indisponibles : {error}</p> : null}
-      <Results hits={hits} ran={ran && !error} />
+      <Results hits={hits} newer={newer} audit={audit} ran={ran && !error} />
     </section>
   )
 }
@@ -157,6 +163,12 @@ export default function App() {
         </a>
 
         <nav className="nav" aria-label="Principal">
+          <a
+            href="#/presentation"
+            aria-current={route.name === 'presentation' ? 'page' : undefined}
+          >
+            Présentation
+          </a>
           <a href="#/" aria-current={route.name === 'search' ? 'page' : undefined}>
             Rechercher
           </a>
@@ -199,16 +211,23 @@ export default function App() {
             and the map as they were, without searching again. */}
         {!loading && account ? (
           <div hidden={route.name !== 'search'}>
-            <Search />
+            <Search paid={account.plan === 'paid'} />
           </div>
         ) : null}
-        {loading ? null : route.name === 'saved' ? (
+        {loading ? null : route.name === 'presentation' ? (
+          <Presentation
+            hero
+            signedIn={Boolean(account)}
+            onSignIn={() => void signInWithGoogle()}
+          />
+        ) : route.name === 'saved' ? (
           <Saved signedIn={Boolean(account)} />
         ) : route.name === 'detail' ? (
           account ? (
             <Detail
               key={`${route.source}/${route.dept ?? ''}/${route.key}`}
               record={{ source: route.source, key: route.key, dept: route.dept }}
+              paid={account.plan === 'paid'}
             />
           ) : (
             <Gate
@@ -219,12 +238,19 @@ export default function App() {
             />
           )
         ) : account ? null : (
-          <Gate
-            title="Retrouvez un logement à partir de son DPE"
-            lede="Une annonce publie la classe énergie, la surface et la commune, mais pas l’adresse. Le diagnostic, lui, est public. Connectez-vous pour l’interroger."
-            cta="Se connecter et chercher"
-            onSignIn={() => void signInWithGoogle()}
-          />
+          <>
+            <Gate
+              title="Retrouvez un logement à partir de son DPE"
+              lede="Une annonce publie la classe énergie, la surface et la commune, mais pas l’adresse. Le diagnostic, lui, est public. Connectez-vous pour l’interroger."
+              cta="Se connecter et chercher"
+              onSignIn={() => void signInWithGoogle()}
+            />
+            <Presentation
+              hero={false}
+              signedIn={false}
+              onSignIn={() => void signInWithGoogle()}
+            />
+          </>
         )}
       </main>
     </>

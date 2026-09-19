@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { signUpViaApi, uniqueEmail } from './helpers'
+import { makePaid, signUpViaApi, uniqueEmail } from './helpers'
 
 /**
  * The certificates require a session, and the proof is at the transport.
@@ -52,6 +52,18 @@ test('a signed-in caller reads them, with ranges intact', async ({ page }) => {
   expect((await part.body()).byteLength).toBe(100)
 })
 
+test('the last two months answer 403 to a free member and 200 to a paid one', async ({ page }) => {
+  const email = uniqueEmail('gate-paid')
+  await signUpViaApi(page, email)
+  expect((await page.request.get('/data/recent/v1/manifest.json')).status()).toBe(403)
+
+  await makePaid(page, email)
+  const res = await page.request.get('/data/recent/v1/manifest.json')
+  expect(res.status()).toBe(200)
+  expect(res.headers()['cache-control']).toContain('no-store')
+  expect(((await res.json()) as { partitions: unknown[] }).partitions.length).toBeGreaterThan(0)
+})
+
 test('the engine stays reachable signed out, and still says application/wasm', async ({ page }) => {
   const res = await page.request.head('/data/vendor/duckdb/duckdb-eh.wasm')
   expect(res.status()).toBe(200)
@@ -70,4 +82,47 @@ test('a certificate link shared with a stranger shows the gate', async ({ page }
   // conso_5_usages_ef lives only in the wide file. Its absence is the proof
   // nothing was fetched, rather than fetched and not rendered.
   await expect(page.getByText('conso_5_usages_ef')).toHaveCount(0)
+})
+
+/**
+ * The presentation is what a stranger reads before deciding to sign in, so it
+ * sits under the gate on the landing page and has a menu entry of its own.
+ */
+const GAPS = 'Ce que l’annonce ne dit pas'
+
+test('a stranger reads the presentation under the sign-in prompt', async ({ page }) => {
+  await page.goto('/')
+
+  const cta = page.getByRole('button', { name: 'Se connecter et chercher' })
+  const gaps = page.getByRole('heading', { name: GAPS })
+  await expect(cta).toBeVisible()
+  await expect(gaps).toBeVisible()
+  const [above, below] = [await cta.boundingBox(), await gaps.boundingBox()]
+  expect(below!.y).toBeGreaterThan(above!.y)
+})
+
+test('the presentation is the first entry of the menu, and a page of its own', async ({ page }) => {
+  await page.goto('/')
+
+  const menu = page.getByRole('navigation', { name: 'Principal' }).getByRole('link')
+  await expect(menu.first()).toHaveText('Présentation')
+  await menu.first().click()
+
+  await expect(page).toHaveURL(/#\/presentation$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+    'L’annonce montre une lettre. Le diagnostic montre le logement.',
+  )
+  await expect(page.getByRole('heading', { name: GAPS })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Retrouvez un logement à partir de son DPE' }),
+  ).toHaveCount(0)
+})
+
+test('signed in, the landing page is still the search', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('presentation'))
+  await page.goto('/')
+
+  await expect(page.locator('form.search #cp')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Présentation' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: GAPS })).toHaveCount(0)
 })

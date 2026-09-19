@@ -44,6 +44,27 @@ function open(env: { DB: D1Database }) {
   return drizzle(env.DB, { schema: s })
 }
 
+// --- plans -----------------------------------------------------------------
+
+export type Plan = 'free' | 'paid'
+
+/**
+ * The caller's plan, read fresh on every call so a downgrade takes effect on
+ * the next request rather than when a session expires.
+ *
+ * Only the exact value 'paid' is paid. No row, an empty subject or anything
+ * the CHECK somehow let through is free: the gate fails closed. See ADR-0038.
+ */
+export async function planOf(env: { DB: D1Database }, caller: Caller): Promise<Plan> {
+  const rows = await open(env)
+    .select({ plan: s.user.plan })
+    .from(s.user)
+    .where(eq(s.user.id, caller.sub))
+    .limit(1)
+    .all()
+  return rows[0]?.plan === 'paid' ? 'paid' : 'free'
+}
+
 // --- saved buildings -------------------------------------------------------
 
 export async function listSavedBuildings(env: { DB: D1Database }, caller: Caller) {

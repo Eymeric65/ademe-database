@@ -129,6 +129,62 @@ SEARCH: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     ),
 }
 
+# The paid window: rows established in the last RECENT_MONTHS are published in
+# a tree of their own that only paid members read. Per source, the date that
+# places a row in it, and the columns of the counts-only file free members
+# read instead -- exactly what the app's `searchQuery` filters on, and never
+# a key, an address or a coordinate. See ADR-0039.
+RECENT_MONTHS = 2
+
+_DWELLING_FILTERS = (
+    "code_postal_ban",
+    "nom_commune_ban",
+    "etiquette_dpe",
+    "etiquette_ges",
+    "date_etablissement_dpe",
+    "surface_habitable_logement",
+    "conso_5_usages_par_m2_ep",
+    "emission_ges_5_usages_par_m2",
+    "type_batiment",
+    "periode_construction",
+)
+
+RECENT: dict[str, tuple[str, tuple[str, ...]]] = {
+    "existant": ("date_etablissement_dpe", _DWELLING_FILTERS),
+    "neuf": ("date_etablissement_dpe", _DWELLING_FILTERS),
+    "audit": (
+        "date_etablissement_audit",
+        (
+            "categorie_scenario",
+            "etape_travaux",
+            "code_postal_ban",
+            "nom_commune_ban",
+            "classe_bilan_dpe",
+            "etiquette_ges",
+            "date_etablissement_audit",
+            "surface_habitable_logement",
+            "ep_conso_5_usages_m2",
+            "emission_ges_5_usages_m2",
+        ),
+    ),
+    "tertiaire": (
+        "date_etablissement_dpe",
+        (
+            "code_postal_ban",
+            "nom_commune_ban",
+            "etiquette_dpe",
+            "etiquette_ges",
+            "date_etablissement_dpe",
+            "surface_utile",
+            "conso_kwhep_m2_an",
+            "emission_ges_kg_co2_m2_an",
+            "secteur_activite",
+            "categorie_erp",
+            "periode_construction",
+        ),
+    ),
+}
+
 # The overseas departements are three-digit codes with a few thousand rows
 # each. One partition each would mean four files a search has to consider for
 # no benefit; merged, they are one small file.
@@ -610,19 +666,25 @@ def _fmt(value, encoding: str, scale: int) -> str:
     return str(value)
 
 
-def read_rows(out_dir: Path, numeros: list[str]) -> dict[str, dict[str, str]]:
-    """The published rows, as source-shaped strings. Used by the round-trip."""
+def read_rows(
+    out_dir: Path, numeros: list[str], recent_dir: Path | None = None
+) -> dict[str, dict[str, str]]:
+    """The published rows, as source-shaped strings. Used by the round-trip.
+
+    `recent_dir` is the paid tree a split published beside `out_dir`, read
+    with it (ADR-0039)."""
     root = Path(out_dir)
     manifest = json.loads((root / "manifest.json").read_text())
     meta = manifest["column_meta"]
     # A manifest from before ADR-0029 names no key: it was numero_dpe.
     key = manifest.get("key", "numero_dpe")
+    roots = [root] + ([Path(recent_dir)] if recent_dir else [])
 
     duck = duckdb.connect()
-    files = str(root / "dpe" / "*" / "*.parquet")
+    files = ", ".join(f"'{r / 'dpe' / '*' / '*.parquet'}'" for r in roots)
     marks = ",".join("?" * len(numeros))
     cur = duck.execute(
-        f"SELECT * FROM read_parquet('{files}', hive_partitioning = false)"
+        f"SELECT * FROM read_parquet([{files}], hive_partitioning = false)"
         f" WHERE {key} IN ({marks})",
         numeros,
     )
@@ -639,8 +701,10 @@ def read_rows(out_dir: Path, numeros: list[str]) -> dict[str, dict[str, str]]:
 
     # The side file wins: a value the declared scale could not hold was stored
     # verbatim precisely because the scaled copy is lossy for it.
-    vpath = root / "index" / "scale-violation.parquet"
-    if vpath.exists() and out:
+    for r in roots:
+        vpath = r / "index" / "scale-violation.parquet"
+        if not (vpath.exists() and out):
+            continue
         for numero, col, raw in duck.execute(
             f"SELECT {key}, column_name, raw_value FROM read_parquet('{vpath}')"
             f" WHERE {key} IN ({marks})",

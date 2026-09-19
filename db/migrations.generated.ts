@@ -38,5 +38,11 @@ export const MIGRATIONS: readonly Migration[] = [
       "DROP INDEX IF EXISTS `saved_building_user_dpe_unique`;",
       "CREATE UNIQUE INDEX IF NOT EXISTS `saved_building_user_source_key_unique` ON `saved_building` (`user_id`,`source`,`numero_dpe`);"
     ]
+  },
+  {
+    "name": "0003_user_plan",
+    "statements": [
+      "ALTER TABLE `user` ADD `plan` text DEFAULT 'free' NOT NULL CHECK (`plan` in ('free', 'paid'));"
+    ]
   }
 ] as const

@@ -37,6 +37,16 @@ const PUBLIC = ['/api/health', '/api/auth/*', '/data/vendor/*']
 const SIGNED_IN = ['/data/v1/*']
 
 /**
+ * Needs a caller whose account is on the paid plan: the last two months of
+ * certificates, published in their own tree. Checked in the gate after the
+ * caller, so it is strictly narrower than `signed-in`. See ADR-0038.
+ */
+const PAID = ['/data/recent/*']
+
+/** The paid tree, as a concrete path a route pattern either covers or does not. */
+const RECENT_PROBE = '/data/recent/x'
+
+/**
  * Reads the caller's own identity and nothing owned. Every addition here needs
  * a cross-tenant test in the same PR.
  */
@@ -52,6 +62,19 @@ export function declaredRoutes(source: string): Declared[] {
     out.push({ path: m[1] as string, scope: m[2] as string })
   }
   return out
+}
+
+/**
+ * Does a declared path cover `concrete`? The same rule as `match` in the
+ * router: a trailing `/*` takes the whole subtree, anything else is exact.
+ */
+export function covers(pattern: string, concrete: string): boolean {
+  return pattern.endsWith('/*') ? concrete.startsWith(pattern.slice(0, -1)) : pattern === concrete
+}
+
+/** Routes that would serve the paid tree to somebody the paid gate never saw. */
+export function leaksRecent(routes: Declared[]): Declared[] {
+  return routes.filter((r) => r.scope !== 'paid' && covers(r.path, RECENT_PROBE))
 }
 
 describe('the detector itself', () => {
@@ -71,6 +94,17 @@ describe('the detector itself', () => {
   it('finds nothing in a file with no routes', () => {
     expect(declaredRoutes('const x = 1')).toEqual([])
   })
+
+  it('flags a wider data route that would swallow the paid tree', () => {
+    // `/data/*` signed-in would answer /data/recent/... without the plan check.
+    expect(
+      leaksRecent([
+        { path: '/data/*', scope: 'signed-in' },
+        { path: '/data/v1/*', scope: 'signed-in' },
+        { path: '/data/recent/*', scope: 'paid' },
+      ]),
+    ).toEqual([{ path: '/data/*', scope: 'signed-in' }])
+  })
 })
 
 describe('the router', () => {
@@ -85,7 +119,7 @@ describe('the router', () => {
 
   it('gives every route a known scope', () => {
     for (const r of routes) {
-      expect(['public', 'signed-in', 'self', 'owner'], r.path).toContain(r.scope)
+      expect(['public', 'signed-in', 'paid', 'self', 'owner'], r.path).toContain(r.scope)
     }
   })
 
@@ -107,8 +141,14 @@ describe('the router', () => {
     )
   })
 
+  it('exposes exactly the paid routes on the allowlist', () => {
+    expect(routes.filter((r) => r.scope === 'paid').map((r) => r.path).sort()).toEqual(
+      [...PAID].sort(),
+    )
+  })
+
   it('leaves everything else owner-scoped', () => {
-    const named = new Set([...PUBLIC, ...SELF_SCOPED, ...SIGNED_IN])
+    const named = new Set([...PUBLIC, ...SELF_SCOPED, ...SIGNED_IN, ...PAID])
     for (const r of routes) {
       if (!named.has(r.path)) expect(r.scope, r.path).toBe('owner')
     }
@@ -121,5 +161,19 @@ describe('the router', () => {
     for (const r of routes) {
       if (r.path.startsWith('/api/')) expect(r.scope, r.path).not.toBe('signed-in')
     }
+  })
+
+  it('never lets an /api route take the paid scope', () => {
+    // `paid` checks a plan and filters on nothing, like `signed-in`. The paid
+    // tree is data with no owner; /api has an owner for everything.
+    for (const r of routes) {
+      if (r.path.startsWith('/api/')) expect(r.scope, r.path).not.toBe('paid')
+    }
+  })
+
+  it('never lets a non-paid route cover the paid tree', () => {
+    // The router takes the FIRST match, so a wider route declared above the
+    // paid one would answer /data/recent/* without ever asking for a plan.
+    expect(leaksRecent(routes)).toEqual([])
   })
 })
