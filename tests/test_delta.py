@@ -9,6 +9,7 @@ files being readable.
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 
 import duckdb
@@ -290,18 +291,37 @@ class FakeApi:
         self.by_dept = by_dept
         self.lie = lie_about_total
         self.pulled: list[str] = []
+        self.rows_pulled = 0
+
+    @staticmethod
+    def _in_range(qs: str | None, n: str) -> bool:
+        """`numero_dpe:[lo TO hi}`, either end possibly `*`: what reconcile
+        narrows a mismatch with. No qs is the whole département."""
+        if qs is None:
+            return True
+        lo, hi, close = re.search(r"\[(\S+) TO (\S+?)([\]}])", qs).groups()
+        if lo != "*" and n < lo:
+            return False
+        if hi != "*" and (n > hi or (close == "}" and n == hi)):
+            return False
+        return True
 
     def total(self, _client, *, departement=None, qs=None, source=None):
         if self.lie is not None and departement is not None:
             return self.lie
         if departement is not None:
-            return len(self.by_dept.get(departement, []))
+            return sum(self._in_range(qs, n) for n in self.by_dept.get(departement, []))
         return sum(len(v) for v in self.by_dept.values())
 
     def iter_pages(self, _client, *, departement=None, qs=None, select=None, **_kw):
         if departement is not None:
             self.pulled.append(departement)
-            rows = [{"numero_dpe": n} for n in self.by_dept.get(departement, [])]
+            rows = [
+                {"numero_dpe": n}
+                for n in self.by_dept.get(departement, [])
+                if self._in_range(qs, n)
+            ]
+            self.rows_pulled += len(rows)
         else:
             # A numero_dpe:(a OR b) fetch of specific certificates.
             wanted = {w.strip('"') for w in qs.split("(", 1)[1].rstrip(")").split(" OR ")}
@@ -381,6 +401,53 @@ def test_reconcile_pulls_no_ids_when_every_count_agrees(base, tmp_path, monkeypa
     assert all(not r.gone and not r.appeared for r in report.values())
 
 
+def test_a_mismatch_pulls_the_ids_of_the_ranges_that_disagree_not_the_partition(
+    tmp_path, monkeypatch
+):
+    """Audit ids come back at ~800 a second, so pulling a whole département
+    because one row left it cost the 2026-09-14 run its two hours. Counts over
+    ranges of the key are exact and cheap; only the ranges that still disagree
+    are pulled. See ADR-0040."""
+    ids = [f"2409E{i:07d}" for i in range(1, 65)]
+    path, conn = _build(tmp_path, "base", [_row(n, "09", "2026-08-01") for n in ids])
+    export_parquet.export(path, tmp_path / "published")
+    conn.close()
+    published = tmp_path / "published" / export_parquet.VERSION
+
+    # Two left upstream from the middle; one arrived past the published end,
+    # which only an open-ended last range can count.
+    upstream = [n for n in ids if n not in ("2409E0000030", "2409E0000031")] + ["2409E9999999"]
+    fake = FakeApi({"09": upstream})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+    monkeypatch.setattr(delta, "LEAF", 4, raising=False)
+
+    report = delta.reconcile(None, published)
+
+    assert report["09"].gone == ["2409E0000030", "2409E0000031"]
+    assert report["09"].appeared == ["2409E9999999"]
+    assert fake.rows_pulled <= 8, f"pulled {fake.rows_pulled} ids of a 64-row partition"
+
+
+def test_a_key_that_cannot_be_a_bare_range_bound_is_never_cut_at(tmp_path, monkeypatch):
+    """Data Fair rejects a quoted range bound, so a key with a space or a colon
+    cannot be one. Such a range is pulled whole instead of split."""
+    ids = [f"2409E {i:07d}" for i in range(1, 17)]
+    path, conn = _build(tmp_path, "base", [_row(n, "09", "2026-08-01") for n in ids])
+    export_parquet.export(path, tmp_path / "published")
+    conn.close()
+    published = tmp_path / "published" / export_parquet.VERSION
+
+    fake = FakeApi({"09": ids[1:]})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+    monkeypatch.setattr(delta, "LEAF", 4)
+
+    report = delta.reconcile(None, published)
+    assert report["09"].gone == [ids[0]]
+    assert fake.rows_pulled == 15
+
+
 def test_reconcile_refuses_when_upstream_contradicts_itself(base, tmp_path, monkeypatch):
     """A total that disagrees with the ids behind it means the answer cannot be
     trusted, and acting on it would delete rows on the strength of a number
@@ -438,6 +505,40 @@ def test_the_id_pull_agrees_with_the_total_upstream():
     assert reported > 0
     assert len(ids) == reported, f"total says {reported}, the id pull returned {len(ids)}"
     assert len(set(ids)) == len(ids), "upstream returned a duplicate numero_dpe"
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("slug, code", [("existant", "2A"), ("audit", "2A")])
+def test_a_key_range_count_agrees_with_the_ids_behind_it(slug, code):
+    """reconcile narrows a mismatch by counting ranges of the key, and deletes
+    on what those ranges pull. Both only mean something if a range's count is
+    exactly its ids, and if the ranges tile the departement. ADR-0040."""
+    from ademe import api
+    from ademe.config import SOURCES, UNGEOCODED
+
+    client, source = api.client(), SOURCES[slug]
+    key = source.mapping.key
+    ids = sorted(
+        r[key]
+        for page in api.iter_pages(client, departement=code, select=[key], source=source)
+        for r in page.rows
+    )
+    assert len(ids) > 100, "too small a departement to cut"
+    cuts = [ids[len(ids) * i // 4] for i in (1, 2, 3)]
+    bounds = [None, *cuts, None]
+    for lo, hi in zip(bounds, bounds[1:]):
+        rng = delta._range_qs(key, lo, hi)
+        want = sum(1 for n in ids if (lo is None or n >= lo) and (hi is None or n < hi))
+        assert api.total(client, departement=code, qs=rng, source=source) == want, rng
+
+    # The ungeocoded bucket's clause is a negation; AND-ed with a range it must
+    # still tile.
+    whole = api.total(client, departement=UNGEOCODED, source=source)
+    halves = [
+        api.total(client, departement=UNGEOCODED, qs=delta._range_qs(key, a, b), source=source)
+        for a, b in ((None, cuts[1]), (cuts[1], None))
+    ]
+    assert sum(halves) == whole
 
 
 # --- the paid window: split and join (ADR-0039) ------------------------------
