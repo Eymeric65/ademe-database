@@ -3,6 +3,7 @@ import { useSession } from './auth'
 import { parse, useRoute } from './routes'
 import { search, type Hit } from './data/duck'
 import { Detail } from './detail/Detail'
+import { Presentation } from './presentation/Presentation'
 import { Saved } from './saved/Saved'
 import { Results } from './search/Results'
 import { SearchForm } from './search/SearchForm'
@@ -157,6 +158,12 @@ export default function App() {
         </a>
 
         <nav className="nav" aria-label="Principal">
+          <a
+            href="#/presentation"
+            aria-current={route.name === 'presentation' ? 'page' : undefined}
+          >
+            Présentation
+          </a>
           <a href="#/" aria-current={route.name === 'search' ? 'page' : undefined}>
             Rechercher
           </a>
@@ -202,7 +209,13 @@ export default function App() {
             <Search />
           </div>
         ) : null}
-        {loading ? null : route.name === 'saved' ? (
+        {loading ? null : route.name === 'presentation' ? (
+          <Presentation
+            hero
+            signedIn={Boolean(account)}
+            onSignIn={() => void signInWithGoogle()}
+          />
+        ) : route.name === 'saved' ? (
           <Saved signedIn={Boolean(account)} />
         ) : route.name === 'detail' ? (
           account ? (
@@ -219,12 +232,19 @@ export default function App() {
             />
           )
         ) : account ? null : (
-          <Gate
-            title="Retrouvez un logement à partir de son DPE"
-            lede="Une annonce publie la classe énergie, la surface et la commune, mais pas l’adresse. Le diagnostic, lui, est public. Connectez-vous pour l’interroger."
-            cta="Se connecter et chercher"
-            onSignIn={() => void signInWithGoogle()}
-          />
+          <>
+            <Gate
+              title="Retrouvez un logement à partir de son DPE"
+              lede="Une annonce publie la classe énergie, la surface et la commune, mais pas l’adresse. Le diagnostic, lui, est public. Connectez-vous pour l’interroger."
+              cta="Se connecter et chercher"
+              onSignIn={() => void signInWithGoogle()}
+            />
+            <Presentation
+              hero={false}
+              signedIn={false}
+              onSignIn={() => void signInWithGoogle()}
+            />
+          </>
         )}
       </main>
     </>
