@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import tempfile
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -311,6 +313,100 @@ def _published_ids(duck, root: Path | str, dept: str, key: str = "numero_dpe") -
     ]
 
 
+# A range holding this many published rows or fewer is pulled rather than
+# split again; a split costs FANOUT counts. See ADR-0040.
+LEAF = 2_000
+FANOUT = 8
+
+
+# TRAP: Data Fair's qs parser rejects a quoted range bound (`Expected "."`),
+# so a bound goes in bare -- and is only ever cut at a key made of these.
+_BARE = re.compile(r"[A-Za-z0-9-]+")
+
+
+def _range_qs(key: str, lo: str | None, hi: str | None) -> str | None:
+    """`key` in [lo, hi); None is an open end. Both open is the whole
+    departement, which needs no clause at all."""
+    if lo is None and hi is None:
+        return None
+    start = "*" if lo is None else lo
+    return f"{key}:[{start} TO *]" if hi is None else f"{key}:[{start} TO {hi}}}"
+
+
+def _narrow(
+    client,
+    source: Source,
+    dept: str,
+    codes: list[str],
+    here: list[str],
+    lo: str | None,
+    hi: str | None,
+    upstream: int,
+) -> tuple[set[str], set[str]]:
+    """(gone, appeared) within [lo, hi), whose sorted published keys are `here`
+    and whose count upstream is `upstream`.
+
+    Counts over ranges of the key are exact and cost one request each, where
+    pulling the ids of a whole departement costs a page per 10,000 of them.
+    So a range that disagrees is split at its published quantiles and only the
+    sub-ranges that still disagree are followed, down to LEAF rows.
+    """
+    key = source.mapping.key
+    if upstream == len(here):
+        return set(), set()
+
+    # Strictly inside the range: a cut at `lo` would hand the whole range back
+    # to itself, forever.
+    cuts = sorted(
+        {
+            c
+            for c in (here[len(here) * i // FANOUT] for i in range(1, FANOUT))
+            if _BARE.fullmatch(c) and (lo is None or c > lo)
+        }
+    )
+    if len(here) <= LEAF or not cuts:
+        rng = _range_qs(key, lo, hi)
+        there: set[str] = set()
+        for code in codes:
+            for page in api.iter_pages(
+                client,
+                departement=code,
+                qs=rng,
+                select=[key],
+                page_size=PAGE_SIZE,
+                source=source,
+            ):
+                there.update(r[key] for r in page.rows)
+
+        # TRAP: upstream has to agree with itself before we act on it.
+        # Deleting rows on the strength of a total that disagrees with the
+        # ids behind it is deleting on the strength of a number known wrong.
+        if len(there) != upstream:
+            raise ReconcileError(
+                f"dept {dept}: total says {upstream} for {rng or 'the departement'}"
+                f" but the id pull returned {len(there)}; refusing to reconcile"
+                " against a source that contradicts itself"
+            )
+        mine = set(here)
+        return mine - there, there - mine
+
+    bounds = [lo, *cuts, hi]
+    gone: set[str] = set()
+    appeared: set[str] = set()
+    for a, b in zip(bounds, bounds[1:]):
+        start = 0 if a is None else bisect_left(here, a)
+        end = len(here) if b is None else bisect_left(here, b)
+        sub = here[start:end]
+        count = sum(
+            api.total(client, departement=c, qs=_range_qs(key, a, b), source=source)
+            for c in codes
+        )
+        g, n = _narrow(client, source, dept, codes, sub, a, b, count)
+        gone |= g
+        appeared |= n
+    return gone, appeared
+
+
 def reconcile(
     client, root: Path | str, *, quiet: bool = True, source: Source = EXISTANT
 ) -> dict[str, Divergence]:
@@ -322,10 +418,9 @@ def reconcile(
     view, and `date_derniere_modification_dpe > mark` never returns it. An
     upsert-only merge would keep it forever. See ADR-0007.
 
-    The count is checked first because the id pull is not free: measured at
-    16.0 B a row, the whole dataset is ~248 MB and about eight minutes at
-    ADEME's documented 500 kB/s. Spending that every week on partitions that
-    already agree would be the difference between a polite job and a rude one.
+    The count is checked first because the id pull is not free, and a
+    mismatch is narrowed by counts over ranges of the key before any id is
+    pulled -- see ADR-0040 and `_narrow`.
     """
     manifest = read_manifest(root)
     duck = duckdb.connect()
@@ -339,30 +434,10 @@ def reconcile(
         div = Divergence(dept=dept, published=part["rows"], upstream=upstream)
 
         if upstream != part["rows"]:
-            key = source.mapping.key
-            here = set(_published_ids(duck, root, dept, key))
-            there: set[str] = set()
-            for code in codes:
-                for page in api.iter_pages(
-                    client,
-                    departement=code,
-                    select=[key],
-                    page_size=PAGE_SIZE,
-                    source=source,
-                ):
-                    there.update(r[key] for r in page.rows)
-
-            # TRAP: upstream has to agree with itself before we act on it.
-            # Deleting rows on the strength of a total that disagrees with the
-            # ids behind it is deleting on the strength of a number known wrong.
-            if len(there) != upstream:
-                raise ReconcileError(
-                    f"dept {dept}: total says {upstream} but the id pull returned"
-                    f" {len(there)}; refusing to reconcile against a source that"
-                    " contradicts itself"
-                )
-            div.gone = sorted(here - there)
-            div.appeared = sorted(there - here)
+            here = sorted(_published_ids(duck, root, dept, source.mapping.key))
+            gone, appeared = _narrow(client, source, dept, codes, here, None, None, upstream)
+            div.gone = sorted(gone)
+            div.appeared = sorted(appeared)
 
         if not quiet:
             state = "ok" if div.clean() else f"-{len(div.gone)} +{len(div.appeared)}"
