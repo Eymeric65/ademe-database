@@ -46,7 +46,10 @@ function track(page: Page): Tally {
     const kind = url.pathname.replace(/^\/data\/v1\//, '').replace(/dept=[^/]+\/.*/, 'dept=*')
     tally.byPath[kind] = (tally.byPath[kind] ?? 0) + 1
     const whole = req.method() === 'GET' && res.status() === 200
-    if (whole && url.pathname.endsWith('.parquet') && !url.pathname.includes('/search/')) {
+    // A counts file is fetched whole on purpose, like a small search file: a
+    // free search counts the recent rows it matches (ADR-0039).
+    const small = url.pathname.includes('/search/') || url.pathname.includes('/recent-counts/')
+    if (whole && url.pathname.endsWith('.parquet') && !small) {
       tally.full += 1
     }
     void Promise.all([req.sizes(), req.allHeaders()]).then(([s, headers]) => {

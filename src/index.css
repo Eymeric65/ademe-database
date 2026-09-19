@@ -764,6 +764,62 @@ h1 {
   }
 }
 
+/* --- the last two months, for paid members (ADR-0039) ------------------- */
+
+/*
+ * Placeholder rows under a blur, the count printed across them. Nothing under
+ * the blur is data; it only says where the rows would be.
+ */
+.recent-locked {
+  position: relative;
+  display: grid;
+  border-top: 1px solid var(--color-border);
+}
+
+.recent-locked-rows {
+  grid-area: 1 / 1;
+  filter: blur(5px);
+  opacity: 0.55;
+  pointer-events: none;
+  user-select: none;
+}
+
+.recent-locked-rows .hit:first-child {
+  border-top: 0;
+}
+
+.recent-locked-note {
+  grid-area: 1 / 1;
+  place-self: center;
+  /* TRAP: the rows' opacity paints them as a positioned layer, over any
+     sibling that is not positioned -- this note included. */
+  position: relative;
+  z-index: 1;
+  margin: 1rem;
+  padding: 0.7rem 1rem;
+  max-width: 26rem;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent);
+  border-radius: var(--radius);
+}
+
+.map-recent-note {
+  max-width: 14rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
 /*
  * The source tabs: four radios printed as index tabs along the card's top
  * edge. A radio underneath, so the keyboard and a screen reader get a group

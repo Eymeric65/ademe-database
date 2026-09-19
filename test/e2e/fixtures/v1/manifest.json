@@ -1164,13 +1164,31 @@
       "rows": 400,
       "search": {
         "path": "search/dept=09/part-0000.parquet",
-        "bytes": 19273,
-        "sha256": "2fd1b1e69b0e7a53958df65db255bdfcf28b21c29c325018e8e3387d4273303f"
+        "bytes": 18830,
+        "sha256": "448fcfae9b36dbeb56502163a7f0a0ed00eab08e078fdabd4400d0beca91e28d"
       },
       "dpe": {
         "path": "dpe/dept=09/part-0000.parquet",
-        "bytes": 188529,
-        "sha256": "0a03ef7521730fd2fa5740b21f10f703bf5f53dcf6fea182453fd592ad2fc929"
+        "bytes": 184203,
+        "sha256": "cedeea175ede747a58ce4ff9dcd057bc5416e831a5c45126e3e4399ecd442dc2"
+      },
+      "recent": {
+        "rows": 14,
+        "search": {
+          "path": "search/dept=09/part-0000.parquet",
+          "bytes": 4195,
+          "sha256": "4bc6d9c9f57e2bfdd1b217c5a25322734f863046426ff95e457e43e91cf76fd7"
+        },
+        "dpe": {
+          "path": "dpe/dept=09/part-0000.parquet",
+          "bytes": 63120,
+          "sha256": "e3d3010cf2fa993156512a062fd9e7dd450a920e89324296046e716914f5f56e"
+        }
+      },
+      "counts": {
+        "path": "recent-counts/dept=09/part-0000.parquet",
+        "bytes": 2267,
+        "sha256": "49173b371475e67a98506bce92f5a0fd6a0e3d9449b7c619d3c833bdd8baa2c0"
       }
     },
     {
@@ -1181,15 +1199,50 @@
       "rows": 400,
       "search": {
         "path": "search/dept=48/part-0000.parquet",
-        "bytes": 18776,
-        "sha256": "6154958023394007ddb73c063a87b8c5f6f589c72ecd968eefbe83995ce9ec4a"
+        "bytes": 18310,
+        "sha256": "e23fd7624b0af30f84a44575bf7cdb65ac54292778ae0c82d046da01b83de40d"
       },
       "dpe": {
         "path": "dpe/dept=48/part-0000.parquet",
-        "bytes": 186208,
-        "sha256": "d9a23519cb8211fec3df9d5e895b48393d0e5aab7dbca824920d08b5593a9186"
+        "bytes": 182006,
+        "sha256": "8abe103cebeaa10fb304ec46de7bbf1e83bde0d9361378913c9108adb3194ac3"
+      },
+      "recent": {
+        "rows": 14,
+        "search": {
+          "path": "search/dept=48/part-0000.parquet",
+          "bytes": 4323,
+          "sha256": "24ede14e4589872a2ffebb2192696ba5ba4fdbea5ec83e9542eb47bca6f1d6fd"
+        },
+        "dpe": {
+          "path": "dpe/dept=48/part-0000.parquet",
+          "bytes": 60551,
+          "sha256": "f4cb8363a00c0978d4d9601d3b3270b047e3e42cc0af231a9201a49c71746925"
+        }
+      },
+      "counts": {
+        "path": "recent-counts/dept=48/part-0000.parquet",
+        "bytes": 2345,
+        "sha256": "4e002f9254c77c941ead05e845deca4de08b6be95fd952ea2898c6d54da44f85"
       }
     }
   ],
-  "sliced_from": "2026-09-11T04:15:59+00:00"
+  "sliced_from": "2026-09-11T04:15:59+00:00",
+  "recent": {
+    "cutoff": "2026-07-07",
+    "date_column": "date_etablissement_dpe",
+    "counts_columns": [
+      "code_postal_ban",
+      "nom_commune_ban",
+      "etiquette_dpe",
+      "etiquette_ges",
+      "date_etablissement_dpe",
+      "surface_habitable_logement",
+      "conso_5_usages_par_m2_ep",
+      "emission_ges_5_usages_par_m2",
+      "type_batiment",
+      "periode_construction"
+    ],
+    "tree": "recent/v1"
+  }
 }

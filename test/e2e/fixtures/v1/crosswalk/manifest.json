@@ -33,13 +33,13 @@
   "partitions": [
     {
       "dept": "09",
-      "rows": 781,
-      "sha256": "976d3a6860c6ec178de529dcb1e97a791b1c693d7d2144a29c5e4a03c286b9c3"
+      "rows": 759,
+      "sha256": "a47bc3e6833ea008e24b0f5acd4334fe306959fe87aeb3663bf50c71bfc298fc"
     },
     {
       "dept": "48",
-      "rows": 641,
-      "sha256": "aa92cb8c606ac145080f43356cd4ea9093364cdd9033ccae319c031c2b986a97"
+      "rows": 616,
+      "sha256": "b3963af9ea4016d25258ae4c879321c17e74c69d2246e83470cc2161c9319c68"
     }
   ],
   "sliced_from": "2026-09-11T04:23:45+00:00"

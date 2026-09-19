@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import { buildings, detail, type Building, type Record_ } from '../data/duck'
+import { buildings, detail, manifest, type Building, type Record_ } from '../data/duck'
 import { formatDate, SOURCE, type Source } from '../data/sources'
 import type { DetailRef } from '../routes'
 import { area, Badge, mapsHref } from '../search/Results'
@@ -37,26 +37,32 @@ const GROUPS: Record<string, string> = {
 const ORDER = Object.keys(GROUPS)
 const title = (group: string) => GROUPS[group] ?? group.replace(/^dpe_/, '').replace(/_/g, ' ')
 
-export function Detail({ record }: { record: DetailRef }) {
+export function Detail({ record, paid }: { record: DetailRef; paid: boolean }) {
   const src = SOURCE[record.source]
   const [rec, setRec] = useState<Record_ | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState<Saved | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState<Set<string>>(() => new Set())
+  // A free member cannot tell a recent record from a missing one -- the paid
+  // tree answers 403 -- so the page says only that recent ones exist.
+  const [locked, setLocked] = useState(false)
 
   useEffect(() => {
     let live = true
     setRec(undefined)
     setError(null)
-    detail(record)
-      .then((r) => live && setRec(r))
+    detail(record, paid)
+      .then(async (r) => {
+        if (live && r === null && !paid) setLocked(Boolean((await manifest(src.subdir)).recent))
+        if (live) setRec(r)
+      })
       // An unreachable data plane must say so, not wait forever.
       .catch((err) => live && setError(err instanceof Error ? err.message : String(err)))
     return () => {
       live = false
     }
-  }, [record])
+  }, [record, paid, src.subdir])
 
   useEffect(() => {
     void api
@@ -81,7 +87,20 @@ export function Detail({ record }: { record: DetailRef }) {
 
   if (error) return <>{back}<p className="error">Les données sont indisponibles : {error}</p></>
   if (rec === undefined) return <>{back}<p className="lede">Chargement…</p></>
-  if (rec === null) return <>{back}<p className="lede">Introuvable dans {src.label.toLowerCase()}.</p></>
+  if (rec === null) {
+    return (
+      <>
+        {back}
+        <p className="lede">Introuvable dans {src.label.toLowerCase()}.</p>
+        {locked ? (
+          <p className="hint">
+            Les {src.id === 'audit' ? 'audits' : 'certificats'} de moins de deux mois sont réservés aux
+            membres payants.
+          </p>
+        ) : null}
+      </>
+    )
+  }
 
   const row = rec.row
   const address = render(row.adresse_ban) || record.key

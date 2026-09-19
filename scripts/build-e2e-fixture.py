@@ -16,6 +16,10 @@ so an overseas fixture could not exercise the map link at all.
 source, plus the RNB, cadastre and crosswalk rows the kept certificates link
 to. That is the only way to get a crosswalk that agrees with the certificates,
 and it is the exact bytes shape R2 serves.
+
+Either way the result is split at FIXTURE_CUTOFF into a base tree and a paid
+`recent/` tree, as the weekly job publishes it (ADR-0039). `--resplit` does
+only that, to the fixture already at `--out`, keeping the same rows.
 """
 
 from __future__ import annotations
@@ -23,13 +27,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sys
+import tempfile
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ademe import api, cadastre, db, export_parquet, ingest, rnb, schema, spec
-from ademe.config import API
+from ademe import api, cadastre, db, export_parquet, ingest, recent, rnb, schema, spec
+from ademe.config import API, SOURCES
 
 # Ariege and Lozere: small, metropolitan, and far enough apart that a postcode
 # selects exactly one of them.
@@ -44,6 +51,13 @@ TARGET = "2107E0132696Z"
 # subdir -> (slug, rows per département). Audits are kept whole, by audit.
 TREES = {"": ("existant", PER_DEPT), "neuf": ("neuf", 100), "tertiaire": ("tertiaire", 100),
          "audit": ("audit", 25)}
+
+# Two months before the frozen high_water (2026-09-07), not before today: the
+# specs count what the split left on each side, and that must not move with the
+# calendar. The specs read it back from the manifest.
+FIXTURE_CUTOFF = date(2026, 7, 7)
+
+REFERENCE = ("rnb", "cadastre", "crosswalk")
 
 
 def _sha256(path: Path) -> str:
@@ -230,6 +244,68 @@ def slice_published(src: Path, out: Path) -> dict:
     return targets
 
 
+def join_all(root: Path, dest: Path) -> None:
+    """ROOT `root`, split or not, as whole trees under ROOT `dest`."""
+    for slug, _ in TREES.values():
+        recent.join(root, dest, SOURCES[slug])
+    for sub in REFERENCE:
+        shutil.copytree(root / export_parquet.VERSION / sub, dest / export_parquet.VERSION / sub)
+
+
+def split_all(root: Path, out: Path) -> dict:
+    """Whole ROOT `root` split at FIXTURE_CUTOFF under ROOT `out`.
+
+    The crosswalk keeps base certificates only: production builds it from the
+    split base tree (ADR-0039), so it never names a recent certificate.
+    Returns the recent certificate the existing-housing specs look for.
+    """
+    import duckdb
+
+    for slug, _ in TREES.values():
+        m = recent.split(root, out, FIXTURE_CUTOFF, SOURCES[slug])
+        print(f"  {slug}: {sum(p['recent']['rows'] for p in m['partitions'])} recent rows")
+
+    src, dst = root / export_parquet.VERSION, out / export_parquet.VERSION
+    for sub in ("rnb", "cadastre"):
+        shutil.copytree(src / sub, dst / sub)
+    duck = duckdb.connect()
+    manifest = json.loads((src / "crosswalk" / "manifest.json").read_text())
+    for part in manifest["partitions"]:
+        rel = Path(f"dept={part['dept']}") / "part-0000.parquet"
+        dest = dst / "crosswalk" / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        duck.execute(
+            f"COPY (SELECT * FROM {_read(src / 'crosswalk' / rel)} WHERE record_key IN"
+            f" (SELECT numero_dpe FROM {_read(dst / 'dpe' / rel)})"
+            f" ORDER BY record_key, rnb_id, parcel_id)"
+            f" TO '{dest}' (FORMAT parquet, {export_parquet.COMPRESSION})"
+        )
+        part["rows"] = duck.execute(f"SELECT count(*) FROM {_read(dest)}").fetchone()[0]
+        part["sha256"] = _sha256(dest)
+    (dst / "crosswalk" / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+
+    # In the target's own postcode and class: the wide search that finds the
+    # target finds this too, first when paid, never when free.
+    whole = _read(src / "search" / f"dept={DEPTS[0]}" / "part-0000.parquet")
+    paid = _read(recent.trees(out, SOURCES["existant"])[1] / "search" / f"dept={DEPTS[0]}" / "part-0000.parquet")
+    row = duck.execute(
+        f"SELECT numero_dpe, code_postal_ban, etiquette_dpe, adresse_ban, date_etablissement_dpe"
+        f" FROM {paid} WHERE (code_postal_ban, etiquette_dpe) IN"
+        f" (SELECT (code_postal_ban, etiquette_dpe) FROM {whole} WHERE numero_dpe = '{TARGET}')"
+        f" ORDER BY date_etablissement_dpe DESC, numero_dpe LIMIT 1"
+    ).fetchone()
+    duck.close()
+    fields = ("key", "code_postal", "classe", "adresse", "date")
+    return {"existant_recent": dict(zip(fields, map(str, row))) if row else None}
+
+
+def install(built: Path, out: Path) -> None:
+    """Replace `out`'s data trees with ROOT `built`'s, leaving the staged engine alone."""
+    for top in (export_parquet.VERSION, recent.PREFIX):
+        shutil.rmtree(out / top, ignore_errors=True)
+        shutil.move(str(built / top), str(out / top))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", type=Path, default=Path("test/e2e/fixtures"))
@@ -238,10 +314,25 @@ def main(argv: list[str] | None = None) -> int:
                      help="a built database to copy column scales and vocabularies from")
     how.add_argument("--from-published", type=Path,
                      help="a published v1 tree to slice every source out of")
+    how.add_argument("--resplit", action="store_true",
+                     help="split the fixture at --out again, at FIXTURE_CUTOFF")
     args = ap.parse_args(argv)
 
-    if args.from_published:
-        targets = slice_published(args.from_published, args.out)
+    if args.from_published or args.resplit:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            targets: dict = {}
+            if args.resplit:
+                join_all(args.out, work / "whole")
+            else:
+                src = args.from_published
+                if "recent" in json.loads((src / "manifest.json").read_text()):
+                    # Slice whole trees: a split one would lose its recent rows.
+                    join_all(src.parent, work / "joined")
+                    src = work / "joined" / export_parquet.VERSION
+                targets = slice_published(src, work / "whole")
+            targets |= split_all(work / "whole", work / "split")
+            install(work / "split", args.out)
         print(json.dumps(targets, indent=2, ensure_ascii=False))
         return 0
 

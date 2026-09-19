@@ -8,8 +8,10 @@ import { Results } from './search/Results'
 import { SearchForm } from './search/SearchForm'
 import type { QuerySpec } from './search/spec'
 
-function Search() {
+function Search({ paid }: { paid: boolean }) {
   const [hits, setHits] = useState<Hit[]>([])
+  const [newer, setNewer] = useState(0)
+  const [audit, setAudit] = useState(false)
   const [ran, setRan] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -18,7 +20,10 @@ function Search() {
     setBusy(true)
     setError(null)
     try {
-      setHits(await search(spec))
+      const found = await search(spec, paid)
+      setHits(found.hits)
+      setNewer(found.newer)
+      setAudit(spec.source === 'audit')
       setRan(true)
     } catch (err) {
       // The data plane is a set of files on another origin. When it is
@@ -39,7 +44,7 @@ function Search() {
       </p>
       <SearchForm onSearch={(spec) => void run(spec)} busy={busy} />
       {error ? <p className="error">Les données sont indisponibles : {error}</p> : null}
-      <Results hits={hits} ran={ran && !error} />
+      <Results hits={hits} newer={newer} audit={audit} ran={ran && !error} />
     </section>
   )
 }
@@ -199,7 +204,7 @@ export default function App() {
             and the map as they were, without searching again. */}
         {!loading && account ? (
           <div hidden={route.name !== 'search'}>
-            <Search />
+            <Search paid={account.plan === 'paid'} />
           </div>
         ) : null}
         {loading ? null : route.name === 'saved' ? (
@@ -209,6 +214,7 @@ export default function App() {
             <Detail
               key={`${route.source}/${route.dept ?? ''}/${route.key}`}
               record={{ source: route.source, key: route.key, dept: route.dept }}
+              paid={account.plan === 'paid'}
             />
           ) : (
             <Gate

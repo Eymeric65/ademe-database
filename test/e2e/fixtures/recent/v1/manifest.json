@@ -1,0 +1,49 @@
+{
+  "version": "v1",
+  "built_at": "2026-09-19T17:30:48+00:00",
+  "key": "numero_dpe",
+  "cutoff": "2026-07-07",
+  "date_column": "date_etablissement_dpe",
+  "counts_columns": [
+    "code_postal_ban",
+    "nom_commune_ban",
+    "etiquette_dpe",
+    "etiquette_ges",
+    "date_etablissement_dpe",
+    "surface_habitable_logement",
+    "conso_5_usages_par_m2_ep",
+    "emission_ges_5_usages_par_m2",
+    "type_batiment",
+    "periode_construction"
+  ],
+  "partitions": [
+    {
+      "dept": "09",
+      "rows": 14,
+      "search": {
+        "path": "search/dept=09/part-0000.parquet",
+        "bytes": 4195,
+        "sha256": "4bc6d9c9f57e2bfdd1b217c5a25322734f863046426ff95e457e43e91cf76fd7"
+      },
+      "dpe": {
+        "path": "dpe/dept=09/part-0000.parquet",
+        "bytes": 63120,
+        "sha256": "e3d3010cf2fa993156512a062fd9e7dd450a920e89324296046e716914f5f56e"
+      }
+    },
+    {
+      "dept": "48",
+      "rows": 14,
+      "search": {
+        "path": "search/dept=48/part-0000.parquet",
+        "bytes": 4323,
+        "sha256": "24ede14e4589872a2ffebb2192696ba5ba4fdbea5ec83e9542eb47bca6f1d6fd"
+      },
+      "dpe": {
+        "path": "dpe/dept=48/part-0000.parquet",
+        "bytes": 60551,
+        "sha256": "f4cb8363a00c0978d4d9601d3b3270b047e3e42cc0af231a9201a49c71746925"
+      }
+    }
+  ]
+}

@@ -1,5 +1,9 @@
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { SAVED_SOURCES } from '../../db/schema'
+import type { QuerySpec } from '../../src/search/spec'
 import {
   dateBounds,
   formatDate,
@@ -12,6 +16,7 @@ import {
   searchQuery,
   toHit,
   type Partition,
+  type Source,
 } from '../../src/data/sources'
 
 /**
@@ -131,6 +136,48 @@ describe('searchQuery', () => {
   it('refuses to build a query over no files', () => {
     expect(() => searchQuery(SOURCE.existant, { commune: 'Foix' }, [])).toThrow()
   })
+
+  it('counts with the same filter, and nothing a count does not need', () => {
+    const spec = { codePostal: '09000', etiquetteDpe: 'E', surface: 176, dateDu: '2026-07-01' }
+    const rows = searchQuery(SOURCE.existant, spec, files)
+    const count = searchQuery(SOURCE.existant, spec, files, 'count')
+    const where = (sql: string) => sql.slice(sql.indexOf(' WHERE '), sql.search(/ ORDER BY |$/))
+    expect(count.sql).toMatch(/^SELECT count\(\*\) AS n FROM /)
+    expect(where(count.sql)).toBe(where(rows.sql))
+    expect(count.sql).not.toMatch(/ORDER BY|LIMIT|OVER/)
+    // The surface ORDER BY binds the surface a fourth time; a count must not.
+    expect(count.params).toEqual(['09000', 'E', '2026-07-01', 171, 181])
+  })
+})
+
+describe('the counts file answers every filter the search can send', () => {
+  // The contract between ademe/export_parquet.py RECENT and searchQuery: a
+  // filter on a column the counts file lacks is a DuckDB error for every free
+  // search that uses it. Read from the committed fixture, which ademe.recent
+  // wrote.
+  const fixture = join(dirname(fileURLToPath(import.meta.url)), '../e2e/fixtures/v1')
+  const everything = (src: Source): QuerySpec => ({
+    codePostal: '09000', commune: 'Foix', etiquetteDpe: 'E', etiquetteGes: 'E',
+    dateDu: '2021-01-01', dateAu: '2026-12-31', surface: 80, consoEp: 200, emissionGes: 30,
+    periodeConstruction: src.periodes[0],
+    ...Object.fromEntries(src.choices.map((c) => [c.field, c.options[0]])),
+  })
+
+  for (const id of SOURCES) {
+    it(`${id}`, () => {
+      const src = SOURCE[id]
+      const m = JSON.parse(readFileSync(join(fixture, src.subdir, 'manifest.json'), 'utf8')) as {
+        search_columns: string[]
+        recent?: { counts_columns: string[] }
+      }
+      expect(m.recent, 'the fixture is split').toBeDefined()
+      const { sql } = searchQuery(src, everything(src), ['f.parquet'], 'count')
+      const where = sql.slice(sql.indexOf(' WHERE '))
+      const read = m.search_columns.filter((c) => new RegExp(`\\b${c}\\b`).test(where))
+      expect(read.length).toBeGreaterThan(5)
+      expect(read.filter((c) => !m.recent?.counts_columns.includes(c))).toEqual([])
+    })
+  }
 })
 
 describe('toHit', () => {

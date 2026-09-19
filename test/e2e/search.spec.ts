@@ -1,5 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
-import { signUpViaApi, uniqueEmail } from './helpers'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { makePaid, signUpViaApi, uniqueEmail } from './helpers'
 
 /**
  * The product's whole reason to exist, through the browser.
@@ -197,7 +200,9 @@ test('a map resized across the breakpoint keeps its tiles and markers inside it'
   await signUpViaApi(page, uniqueEmail('search-resize'))
   await page.setViewportSize({ width: 1280, height: 900 })
   await searchTarget(page, { wide: true })
-  await expect.poll(() => markersInView(page)).toEqual([17, 17])
+  // 17 class-E certificates in 09000, one of them RECENT: a free member's map
+  // has no marker for it.
+  await expect.poll(() => markersInView(page)).toEqual([16, 16])
 
   for (const width of [768, 390, 1280]) {
     await page.setViewportSize({ width, height: 900 })
@@ -209,7 +214,7 @@ test('a map resized across the breakpoint keeps its tiles and markers inside it'
       () => (document.querySelector('.results-map .leaflet-map-pane') as HTMLElement).offsetParent?.className ?? '',
     )
     expect(pane, `at ${width}px`).toContain('results-map')
-    await expect.poll(() => markersInView(page), { message: `at ${width}px` }).toEqual([17, 17])
+    await expect.poll(() => markersInView(page), { message: `at ${width}px` }).toEqual([16, 16])
   }
 })
 
@@ -323,3 +328,60 @@ for (const t of OTHERS) {
     })
   })
 }
+
+// --- the last two months (ADR-0038, ADR-0039) --------------------------------
+
+// The newest class-E certificate in TARGET's postcode, which the fixture's split
+// put in the paid tree: printed by `scripts/build-e2e-fixture.py --resplit`.
+const RECENT = {
+  numero: '2609E2093061X',
+  address: 'Résidence la Condamine 1 09000 Foix',
+  day: '2026-08-06',
+}
+
+test('the fixture puts RECENT on the paid side of its own cutoff', () => {
+  // The cutoff comes from the manifest the split wrote, never from today: the
+  // fixture is frozen, the calendar is not.
+  const m = JSON.parse(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures/v1/manifest.json'), 'utf8'),
+  ) as { recent: { cutoff: string } }
+  expect(RECENT.day >= m.recent.cutoff).toBe(true)
+})
+
+test('a free member is told how many newer certificates match, and shown none', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('recent-free'))
+  await searchTarget(page, { wide: true })
+
+  await expect(page.locator('.recent-locked')).toContainText(
+    '1 certificat plus récent — devenez membre payant pour y accéder',
+  )
+  await expect(page.locator('.map-recent-note')).toHaveText('1 certificat plus récent non affiché sur la carte')
+  // The blurred rows are placeholders: nothing in them is the certificate.
+  await expect(page.getByText(RECENT.address)).toHaveCount(0)
+  await expect.poll(() => markersInView(page)).toEqual([16, 16])
+})
+
+test('a free member following a link to a recent certificate is told why it is not there', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('recent-free-detail'))
+  await page.goto(`/#/existant/09/${RECENT.numero}`)
+
+  await expect(page.getByText('Introuvable dans logement existant.')).toBeVisible({ timeout: 30_000 })
+  await expect(
+    page.getByText('Les certificats de moins de deux mois sont réservés aux membres payants.'),
+  ).toBeVisible()
+})
+
+test('a paid member gets the newest certificate first, and opens it', async ({ page }) => {
+  const email = uniqueEmail('recent-paid')
+  await signUpViaApi(page, email)
+  await makePaid(page, email)
+  await searchTarget(page, { wide: true })
+
+  await expect(page.locator('.hit-address').first()).toHaveText(RECENT.address)
+  await expect(page.locator('.recent-locked')).toHaveCount(0)
+  await expect(page.locator('.map-recent-note')).toBeHidden()
+  await expect.poll(() => markersInView(page)).toEqual([17, 17])
+
+  await page.getByRole('link', { name: RECENT.address }).click()
+  await expect(page.getByRole('heading', { name: RECENT.address })).toBeVisible({ timeout: 30_000 })
+})
