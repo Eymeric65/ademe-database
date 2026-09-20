@@ -1,8 +1,15 @@
 <!--
-  The label ramp, at 16 px: an ink block with three rungs of the official DPE
-  scale climbing across it. Colours are the primitives from src/index.css --
-  --prussian-ink for the block, --dpe-a / --dpe-d / --dpe-g for the rungs.
+  The label ramp at 16 px: an ink block carrying three rungs of the DPE scale.
   Seven rungs would be mush at this size; three still read as a staircase.
+  Colours are the primitives from src/index.css: prussian-ink for the block,
+  then dpe-a, dpe-d and dpe-g for the rungs, spelled here without the leading
+  dashes that CSS uses.
+
+  TRAP: an XML comment may not contain a double hyphen. Spell those custom
+  properties the way CSS does and the whole file stops parsing, so a browser
+  shows an error page where the icon should be. Nothing else notices: the
+  build copies public/ byte for byte and never reads the SVG.
+  test/unit/seo-head.test.ts is what catches it now.
 -->
 <svg
   xmlns="http://www.w3.org/2000/svg"
