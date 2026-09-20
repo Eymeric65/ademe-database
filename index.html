@@ -3,7 +3,35 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>DPE — recherche-maison</title>
+    <title>DPE : consulter le diagnostic énergétique d’un logement</title>
+
+    <!-- The app renders into an empty #root, so a crawler, a link preview or a
+         messaging app sees this head and nothing else. It is the whole page as
+         far as they are concerned. test/unit/seo-head.test.ts holds it here. -->
+    <meta
+      name="description"
+      content="L’annonce affiche une lettre, le diagnostic décrit le logement : retrouvez le DPE public d’un bien à partir de sa commune, sa classe énergie et sa surface."
+    />
+    <link rel="canonical" href="https://recherche-maison.com/" />
+
+    <meta
+      property="og:title"
+      content="L’annonce montre une lettre. Le diagnostic montre le logement."
+    />
+    <meta
+      property="og:description"
+      content="Retrouvez le diagnostic de performance énergétique public d’un logement à partir de ce qu’une annonce immobilière en dit : commune, classe énergie, surface."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://recherche-maison.com/" />
+    <meta property="og:locale" content="fr_FR" />
+    <meta property="og:site_name" content="recherche-maison" />
+    <meta name="twitter:card" content="summary" />
+
+    <!-- Prussian blue, the same --color-accent src/index.css leads with. -->
+    <meta name="theme-color" content="#1f4e79" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
     <!-- The display face is on the first heading of every screen, so it is
          worth one preload; @font-face alone would not fetch it until the CSS
          had parsed and the text had been laid out once in the fallback. -->
