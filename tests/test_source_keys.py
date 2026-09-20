@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import date
 
 import duckdb
 import pytest
@@ -152,6 +153,25 @@ def test_the_weekly_merge_replaces_one_step_and_keeps_the_others(audit_like, tmp
     ).fetchall()
     # Anti-joined on numero_dpe, E1 would be gone: it shares E2's DPE.
     assert merged == [("E1", "D"), ("E2", "A")]
+
+
+def test_a_withdrawn_step_is_tagged_by_the_sources_own_key(audit_like, tmp_path):
+    """Every step of an audit shares one numero_dpe, so a tag written against
+    that column marks the whole audit when one step is withdrawn."""
+    _build(audit_like, [_row("E1", etiquette_dpe="D"), _row("E2", etiquette_dpe="D")]).close()
+    export_parquet.export(audit_like.db_path, tmp_path / "base", source=audit_like)
+    root = tmp_path / "base" / export_parquet.VERSION / "audit-like"
+
+    report = {"09": delta.Divergence(dept="09", published=2, upstream=1, gone=["E2"])}
+    out = tmp_path / "reconciled"
+    delta.apply_deletions(root, report, out, source=audit_like, on=date(2026, 9, 21))
+
+    tagged = duckdb.connect().execute(
+        "SELECT id_etape, withdrawn_on FROM read_parquet(?, hive_partitioning = false)"
+        " ORDER BY id_etape",
+        [str(out / "dpe" / "dept=09" / "part-0000.parquet")],
+    ).fetchall()
+    assert tagged == [("E1", None), ("E2", date(2026, 9, 21))]
 
 
 def test_queries_name_the_sources_own_fields(audit_like, tmp_path, monkeypatch):

@@ -71,6 +71,11 @@ SEARCH_COLUMNS = (
 
 SEARCH_SORT = ("code_postal_ban", "etiquette_dpe", "surface_habitable_logement")
 
+# The date a weekly run found the certificate gone from ADEME; NULL while it is
+# live. A withdrawn certificate is tagged, never deleted -- see ADR-0044.
+WITHDRAWN = "withdrawn_on"
+WITHDRAWN_NULL = f"CAST(NULL AS DATE) AS {WITHDRAWN}"
+
 # Per source, by slug, and deliberately with no default: a search index is a
 # product decision, and a tertiary DPE has no `surface_habitable_logement`.
 # See ADR-0018.
@@ -527,14 +532,17 @@ def export(
         dpe_path.parent.mkdir(parents=True, exist_ok=True)
         search_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # SQLite holds only live certificates, so the tag is always NULL here.
+        # It is written all the same: a file without the column makes every
+        # reader of the published tree special-case it. See ADR-0044.
         duck.execute(
-            f"COPY (SELECT * FROM wide ORDER BY {key}) TO '{dpe_path}'"
+            f"COPY (SELECT *, {WITHDRAWN_NULL} FROM wide ORDER BY {key}) TO '{dpe_path}'"
             f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {DPE_ROW_GROUP})"
         )
         cols = ", ".join(f'"{c}"' for c in search_columns)
         order = ", ".join(f'"{c}"' for c in search_sort)
         duck.execute(
-            f"COPY (SELECT {cols} FROM wide ORDER BY {order}) TO '{search_path}'"
+            f"COPY (SELECT {cols}, {WITHDRAWN_NULL} FROM wide ORDER BY {order}) TO '{search_path}'"
             f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {SEARCH_ROW_GROUP})"
         )
 
