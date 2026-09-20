@@ -329,6 +329,83 @@ for (const t of OTHERS) {
   })
 }
 
+// --- withdrawn certificates (ADR-0044) ---------------------------------------
+
+// The fixture's one withdrawn certificate, in DEPTS[1]'s base tree: printed by
+// `scripts/build-e2e-fixture.py --resplit`. Its partition carries the
+// `withdrawn_on` column and 09's does not, which is the mixed-age tree the
+// published one is during every weekly run.
+const WITHDRAWN = {
+  numero: '2148E0009724W',
+  dept: '48',
+  codePostal: '48100',
+  classe: 'E',
+  address: '1 Square des Cevennes 48100 Bourgs sur Colagne',
+  on: '21/09/2026',
+}
+
+test('a withdrawn certificate says so instead of being a dead end', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('withdrawn-detail'))
+  await page.goto(`/#/existant/${WITHDRAWN.dept}/${WITHDRAWN.numero}`)
+
+  await expect(page.locator('.withdrawn')).toHaveText(
+    `Ce DPE a été retiré du registre ADEME le ${WITHDRAWN.on}.`,
+    { timeout: 60_000 },
+  )
+  // The record is still there: withdrawn is a tag on the row, not a deletion.
+  await expect(page.getByRole('heading', { name: WITHDRAWN.address })).toBeVisible()
+  // And the tag is not one of the raw facts: it is ours, not ADEME's, so it has
+  // no column_meta entry and would render as an unlabelled row.
+  await expect(page.locator('.fact[data-key="withdrawn_on"]')).toHaveCount(0)
+})
+
+test('a live certificate in the same partition says nothing of the sort', async ({ page }) => {
+  /** The non-vacuity proof for the test above: without it, a notice rendered
+   * unconditionally would pass just as well. */
+  await signUpViaApi(page, uniqueEmail('withdrawn-live'))
+  await page.goto('/')
+  await page.getByLabel('Code postal').fill(WITHDRAWN.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(WITHDRAWN.classe)
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+
+  const live = page.locator('.hit').filter({ hasNotText: WITHDRAWN.address }).first()
+  await expect(live).toBeVisible({ timeout: 60_000 })
+  await live.locator('.hit-address a').click()
+  await expect(page.locator('.summary')).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.withdrawn')).toHaveCount(0)
+})
+
+test('a search that returns a withdrawn certificate labels it', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('withdrawn-search'))
+  await page.goto('/')
+  await page.getByLabel('Code postal').fill(WITHDRAWN.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(WITHDRAWN.classe)
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+
+  const hit = page.locator('.hit', { hasText: WITHDRAWN.address })
+  await expect(hit).toBeVisible({ timeout: 60_000 })
+  await expect(hit.locator('.hit-withdrawn')).toHaveText('Retiré du registre ADEME')
+  await expect(page.locator('.hit-withdrawn')).toHaveCount(1)
+})
+
+test('a paid member searches a partition whose two files are of different ages', async ({ page }) => {
+  /** The base file of 48 carries `withdrawn_on` and its recent file does not,
+   * because only the partitions a run rewrites gain the column. A paid member
+   * reads both in ONE scan (ADR-0039), which is a Binder Error unless the
+   * query unions them by name. */
+  const email = uniqueEmail('withdrawn-paid')
+  await signUpViaApi(page, email)
+  await makePaid(page, email)
+  await page.goto('/')
+  await page.getByLabel('Code postal').fill(WITHDRAWN.codePostal)
+  await page.getByLabel('Classe énergie').selectOption(WITHDRAWN.classe)
+  await page.getByRole('button', { name: 'Rechercher' }).click()
+
+  await expect(page.locator('.count')).toBeVisible({ timeout: 60_000 })
+  await expect(page.locator('.error')).toHaveCount(0)
+  await expect(page.locator('.hit', { hasText: WITHDRAWN.address })).toBeVisible()
+})
+
 // --- the last two months (ADR-0038, ADR-0039) --------------------------------
 
 // The newest class-E certificate in TARGET's postcode, which the fixture's split

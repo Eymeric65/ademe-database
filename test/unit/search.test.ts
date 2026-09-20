@@ -133,6 +133,16 @@ describe('searchQuery', () => {
     expect(q.sql).toContain('hive_partitioning = false')
   })
 
+  it('reads files of different ages in one scan', () => {
+    // Only the partitions a weekly run rewrites gain `withdrawn_on`, and a paid
+    // member reads a base file and a recent one together (ADR-0039, ADR-0044).
+    // Without this, DuckDB refuses the scan and the search returns nothing.
+    const q = searchQuery(SOURCE.existant, { codePostal: '09000' }, files)
+    expect(q.sql).toContain('union_by_name = true')
+    const c = searchQuery(SOURCE.existant, { codePostal: '09000' }, files, 'count')
+    expect(c.sql).toContain('union_by_name = true')
+  })
+
   it('refuses to build a query over no files', () => {
     expect(() => searchQuery(SOURCE.existant, { commune: 'Foix' }, [])).toThrow()
   })

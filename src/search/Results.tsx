@@ -123,6 +123,9 @@ export function Results({
                     .filter(Boolean)
                     .join(' · ')}
                 </p>
+                {hit.withdrawn ? (
+                  <p className="hit-withdrawn">Retiré du registre ADEME</p>
+                ) : null}
                 {/* Overseas certificates have no coordinates: their source
                     projection is not Lambert-93 and ADEME's own values land on
                     the wrong continent (ADR-0011). */}
