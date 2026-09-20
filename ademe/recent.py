@@ -33,6 +33,7 @@ from ademe.export_parquet import (
     SEARCH,
     SEARCH_ROW_GROUP,
     VERSION,
+    WITHDRAWN,
     _sha256,
 )
 
@@ -123,9 +124,14 @@ def split(src: Path, out: Path, cutoff: date, source: Source = EXISTANT) -> dict
         duck.execute(
             f'CREATE OR REPLACE TEMP TABLE side AS SELECT "{key}" AS k,'
             f' coalesce(max("{date_col}") OVER (PARTITION BY {by}) >= DATE \'{cutoff}\', false)'
-            f" AS recent FROM {_read(dpe)}"
+            f" AS recent, {WITHDRAWN} IS NULL AS live FROM {delta._wide(duck, _read(dpe))}"
         )
-        n, n_recent = duck.execute("SELECT count(*), count(*) FILTER (recent) FROM side").fetchone()
+        # Live rows on both sides: a withdrawn certificate stays in the file and
+        # on the side its date already put it, but it is not one of the rows the
+        # manifest counts. See ADR-0044.
+        n, n_recent = duck.execute(
+            "SELECT count(*) FILTER (live), count(*) FILTER (recent AND live) FROM side"
+        ).fetchone()
         if n != part["rows"]:
             raise ValueError(f"dept={dept}: {n} rows in {dpe}, the manifest says {part['rows']}")
         duck.execute("INSERT INTO recent_keys SELECT k FROM side WHERE recent")
@@ -133,9 +139,11 @@ def split(src: Path, out: Path, cutoff: date, source: Source = EXISTANT) -> dict
         rel = {kind: f"{kind}/dept={dept}/part-0000.parquet" for kind in ("dpe", "search")}
         for tree, side in ((base_tree, "NOT recent"), (recent_tree, "recent")):
             picked = f'"{key}" IN (SELECT k FROM side WHERE {side})'
-            _copy(duck, f'SELECT * FROM {_read(dpe)} WHERE {picked} ORDER BY "{key}"',
+            _copy(duck, f'SELECT * FROM {delta._wide(duck, _read(dpe))} WHERE {picked}'
+                        f' ORDER BY "{key}"',
                   tree / rel["dpe"], DPE_ROW_GROUP)
-            _copy(duck, f"SELECT {columns} FROM {_read(search)} WHERE {picked} ORDER BY {order}",
+            _copy(duck, f"SELECT {columns} FROM {delta._wide(duck, _read(search))}"
+                        f" WHERE {picked} ORDER BY {order}",
                   tree / rel["search"], SEARCH_ROW_GROUP)
         rel_counts = f"recent-counts/dept={dept}/part-0000.parquet"
         _copy(
@@ -236,12 +244,17 @@ def join(src: Path, out: Path, source: Source = EXISTANT) -> dict:
             ("search", columns, order, SEARCH_ROW_GROUP),
         ):
             both = (
-                f"SELECT * FROM {_read(base_tree / part[kind]['path'])} UNION ALL BY NAME"
-                f" SELECT * FROM {_read(recent_tree / part['recent'][kind]['path'])}"
+                f"SELECT * FROM {delta._wide(duck, _read(base_tree / part[kind]['path']))}"
+                " UNION ALL BY NAME SELECT * FROM"
+                f" {delta._wide(duck, _read(recent_tree / part['recent'][kind]['path']))}"
             )
             _copy(duck, f"SELECT {cols} FROM ({both}) ORDER BY {sort}",
                   dest / part[kind]["path"], row_group)
-        n = duck.execute(f"SELECT count(*) FROM {_read(dest / part['dpe']['path'])}").fetchone()[0]
+        # Live rows, the number the manifest carries and reconcile checks.
+        n = duck.execute(
+            f"SELECT count(*) FROM {_read(dest / part['dpe']['path'])}"
+            f" WHERE {WITHDRAWN} IS NULL"
+        ).fetchone()[0]
         if n != part["rows"]:
             raise ValueError(
                 f"dept={dept}: base and recent join to {n} rows, the manifest says {part['rows']}"

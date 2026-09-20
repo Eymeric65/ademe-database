@@ -678,7 +678,22 @@ def test_reconcile_refuses_when_upstream_contradicts_itself(base, tmp_path, monk
     assert "09" in str(e.value)
 
 
-def test_apply_deletions_rewrites_the_partition_without_the_gone_rows(base, tmp_path, monkeypatch):
+def _tags(path) -> dict[str, object]:
+    """Every row of a partition, by key, against its withdrawn_on."""
+    return dict(
+        duckdb.connect()
+        .execute(
+            "SELECT numero_dpe, withdrawn_on FROM"
+            f" read_parquet('{path}', hive_partitioning = false) ORDER BY numero_dpe"
+        )
+        .fetchall()
+    )
+
+
+def test_a_withdrawn_certificate_is_kept_and_tagged(base, tmp_path, monkeypatch):
+    """ADEME's view just makes a withdrawn certificate vanish, and deleting it
+    here made it vanish twice. It stays, with the date this run found it gone.
+    See ADR-0044."""
     published, _ = base
     fake = FakeApi({"09": ["2409E0000001"], "31": ["2431E0000001"]})
     monkeypatch.setattr(delta.api, "total", fake.total)
@@ -686,20 +701,113 @@ def test_apply_deletions_rewrites_the_partition_without_the_gone_rows(base, tmp_
 
     report = delta.reconcile(None, published)
     out = tmp_path / "reconciled"
-    delta.apply_deletions(published, report, out)
+    delta.apply_deletions(published, report, out, on=date(2026, 9, 21))
 
-    d = duckdb.connect()
-    left = [
-        r[0]
-        for r in d.execute(
-            f"SELECT numero_dpe FROM read_parquet('{out / 'dpe' / 'dept=09' / 'part-0000.parquet'}')"
-            " ORDER BY numero_dpe"
-        ).fetchall()
-    ]
-    assert left == ["2409E0000001"]
+    for kind in ("dpe", "search"):
+        assert _tags(out / kind / "dept=09" / "part-0000.parquet") == {
+            "2409E0000001": None,
+            "2409E0000002": date(2026, 9, 21),
+        }, kind
 
+    # The count stays what ADEME holds, or reconcile diverges against it forever.
     m = json.loads((out / "manifest.json").read_text())
     assert {p["dept"]: p["rows"] for p in m["partitions"]} == {"09": 1, "31": 1}
+
+
+def test_the_repair_path_tags_instead_of_deleting(base, tmp_path, ademe):
+    """The weekly job reconciles with --repair, so the deletions land in the
+    merge's one rewrite (ADR-0043), not in apply_deletions. A tag written only
+    in the fallback would almost never be written at all."""
+    published, _ = base
+    ademe([_row("2409E0000001", "09", "2026-08-01"), _row("2431E0000001", "31", "2026-08-01")])
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, published, out, on=date(2026, 9, 21))
+
+    assert healed.gone == {"09": ["2409E0000002"]}
+    assert _tags(out / "dpe" / "dept=09" / "part-0000.parquet") == {
+        "2409E0000001": None,
+        "2409E0000002": date(2026, 9, 21),
+    }
+
+
+def test_a_withdrawn_row_is_not_reported_gone_again_next_week(base, tmp_path, monkeypatch):
+    """TRAP, and the whole risk of ADR-0044: a tagged row is still in the file.
+
+    Counted as published it stands in for a certificate that really is missing:
+    here the range holds two ids either side, so the counts agree, and the
+    repair never fetches 2409E0000009 at all. On a range where they do not
+    agree the same row is reported `gone` a second time, re-tagged with a new
+    date, and `rows` walks down by one every week.
+    """
+    published, _ = base
+    fake = FakeApi({"09": ["2409E0000001"], "31": ["2431E0000001"]})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+    out = tmp_path / "reconciled"
+    delta.apply_deletions(published, delta.reconcile(None, published), out, on=date(2026, 9, 21))
+
+    # Next week: one certificate appeared, so the counts disagree and the ids
+    # are pulled -- which is the only path that reads what we hold.
+    fake.by_dept["09"] = ["2409E0000001", "2409E0000009"]
+    report = delta.reconcile(None, out)
+
+    assert report["09"].gone == [], "the row we already tagged was reported gone again"
+    assert report["09"].appeared == ["2409E0000009"]
+
+
+def test_a_certificate_that_comes_back_loses_its_tag(base, tmp_path, monkeypatch):
+    """A certificate can leave the dataset and return. The delta's row carries
+    no tag, and the merge takes the delta's version whole, so nothing has to
+    remember to clear it."""
+    published, _ = base
+    fake = FakeApi({"09": ["2409E0000001"], "31": ["2431E0000001"]})
+    monkeypatch.setattr(delta.api, "total", fake.total)
+    monkeypatch.setattr(delta.api, "iter_pages", fake.iter_pages)
+    tagged = tmp_path / "reconciled"
+    delta.apply_deletions(published, delta.reconcile(None, published), tagged, on=date(2026, 9, 21))
+
+    dpath, dconn = _build(tmp_path, "back", [_row("2409E0000002", "09", "2026-09-22")])
+    delta_dir = tmp_path / "delta-out"
+    export_parquet.export(dpath, delta_dir)
+    dconn.close()
+
+    merged = tmp_path / "merged"
+    delta.merge(tagged, delta_dir / export_parquet.VERSION, merged)
+    assert _tags(merged / "dpe" / "dept=09" / "part-0000.parquet") == {
+        "2409E0000001": None,
+        "2409E0000002": None,
+    }
+
+
+def _strip_tag(tree) -> None:
+    """The same tree as it was published before ADR-0044, column and all."""
+    duck = duckdb.connect()
+    for path in sorted(tree.rglob("part-0000.parquet")):
+        duck.execute(
+            "CREATE OR REPLACE TABLE stripped AS SELECT * EXCLUDE (withdrawn_on)"
+            f" FROM read_parquet('{path}', hive_partitioning = false)"
+        )
+        duck.execute(f"COPY stripped TO '{path}' (FORMAT parquet)")
+
+
+def test_a_partition_published_before_the_column_gains_it_when_rewritten(base, tmp_path):
+    """The live tree has no withdrawn_on. Every read of a published file has to
+    survive that until one weekly run per source has been through."""
+    published, _ = base
+    _strip_tag(published)
+    dpath, dconn = _build(tmp_path, "delta", [_row("2409E0000003", "09", "2026-09-01")])
+    delta_dir = tmp_path / "delta-out"
+    export_parquet.export(dpath, delta_dir)
+    dconn.close()
+
+    merged = tmp_path / "merged"
+    delta.merge(published, delta_dir / export_parquet.VERSION, merged)
+    assert _tags(merged / "dpe" / "dept=09" / "part-0000.parquet") == {
+        "2409E0000001": None,
+        "2409E0000002": None,
+        "2409E0000003": None,
+    }
 
 
 @pytest.mark.live
@@ -916,6 +1024,43 @@ def test_a_split_tree_is_refused(whole, tmp_path):
     assert not (tmp_path / "again").exists()
 
 
+def _withdraw(root, dept: str, numero: str, on: date) -> None:
+    """One tagged row, and the live count the ETL writes beside it (ADR-0044)."""
+    tree = root / export_parquet.VERSION
+    duck = duckdb.connect()
+    for kind in ("dpe", "search"):
+        path = _file(tree, kind, dept)
+        duck.execute(
+            "CREATE OR REPLACE TABLE tagged AS SELECT * REPLACE ("
+            f"CASE WHEN numero_dpe = '{numero}' THEN DATE '{on}' ELSE withdrawn_on END"
+            f" AS withdrawn_on) FROM read_parquet('{path}', hive_partitioning = false)"
+        )
+        duck.execute(f"COPY tagged TO '{path}' (FORMAT parquet)")
+    m = json.loads((tree / "manifest.json").read_text())
+    for part in m["partitions"]:
+        if part["dept"] == dept:
+            part["rows"] -= 1
+    (tree / "manifest.json").write_text(json.dumps(m))
+
+
+def test_a_withdrawn_row_splits_with_the_side_its_date_puts_it_on(whole, tmp_path):
+    """Being withdrawn is a tag on the row, not a move: it stays on whichever
+    side of the cutoff its date already put it. What has to change is the row
+    count both sides check themselves against, which is now the live one."""
+    _withdraw(whole, "09", "2409E0000005", date(2026, 9, 21))
+    out = tmp_path / "publish"
+    recent.split(whole, out, CUTOFF)
+    base, paid = out / "v1", out / "recent" / "v1"
+
+    assert _keys(_file(paid, "dpe", "09")) == RECENT_09
+    assert _keys(_file(base, "dpe", "09")) == BASE_09
+    assert _tags(_file(paid, "dpe", "09"))["2409E0000005"] == date(2026, 9, 21)
+
+    joined = tmp_path / "joined"
+    recent.join(out, joined)
+    assert _tags(_file(joined / "v1", "dpe", "09"))["2409E0000005"] == date(2026, 9, 21)
+
+
 def test_join_undoes_split(whole, tmp_path):
     out = tmp_path / "publish"
     recent.split(whole, out, CUTOFF)
@@ -1130,6 +1275,19 @@ PUBLISHED = [
 ]
 
 
+def _live(tree, dept="09") -> set[str]:
+    """The keys ADEME still has: a withdrawn row stays in the file (ADR-0044)."""
+    d = duckdb.connect()
+    return {
+        r[0]
+        for r in d.execute(
+            "SELECT numero_dpe FROM"
+            f" read_parquet('{tree / 'dpe' / f'dept={dept}' / 'part-0000.parquet'}')"
+            " WHERE withdrawn_on IS NULL"
+        ).fetchall()
+    }
+
+
 def _published_rows(tree, dept="09") -> dict[str, str]:
     d = duckdb.connect()
     return dict(
@@ -1232,7 +1390,7 @@ def test_a_swap_that_hides_from_the_key_ranges_is_found_by_date(base, tmp_path, 
 
     assert healed.fetched == ["2409E0000099"]
     assert healed.gone == {"09": ["2409E0000002"]}
-    assert set(_published_rows(out)) == {"2409E0000001", "2409E0000099"}
+    assert _live(out) == {"2409E0000001", "2409E0000099"}
     assert up.ids_pulled < 20
 
 
@@ -1260,7 +1418,7 @@ def test_deletions_are_not_mistaken_for_holes(base, tmp_path, ademe, monkeypatch
 
     assert healed.gone == {"09": ["2409E0000002"]}
     assert healed.fetched == []
-    assert set(_published_rows(out)) == {"2409E0000001"}
+    assert _live(out) == {"2409E0000001"}
     assert up.ids_pulled <= 2, "the date axis chased a day it could never fill"
 
 

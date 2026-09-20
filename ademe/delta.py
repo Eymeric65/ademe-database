@@ -37,6 +37,9 @@ from ademe.config import DEFAULT_DB, EXISTANT, PAGE_SIZE, SOURCES, Source
 from ademe.export_parquet import DPE_ROW_GROUP, SEARCH_ROW_GROUP
 
 
+WITHDRAWN = export_parquet.WITHDRAWN
+
+
 def is_url(root: Path | str) -> bool:
     return str(root).startswith(("http://", "https://"))
 
@@ -213,9 +216,41 @@ def _url(root: Path | str, *parts: str) -> str:
 
 
 def _search(source: Source) -> tuple[str, str]:
-    """The source's search columns and sort, as SQL lists. ADR-0018."""
+    """The source's search columns and sort, as SQL lists. ADR-0018.
+
+    The tag comes last, so a search result can say a certificate was withdrawn
+    without opening the wide file. See ADR-0044.
+    """
     columns, order = export_parquet.SEARCH[source.slug]
-    return ", ".join(f'"{c}"' for c in columns), ", ".join(f'"{c}"' for c in order)
+    return (
+        ", ".join(f'"{c}"' for c in (*columns, WITHDRAWN)),
+        ", ".join(f'"{c}"' for c in order),
+    )
+
+
+def _wide(duck, read: str) -> str:
+    """`read`, with `withdrawn_on` guaranteed to be there.
+
+    TRAP: the published tree has partitions older than ADR-0044, because a run
+    copies the ones it did not touch byte for byte. Naming the column on one of
+    those is a Binder Error that fails the whole weekly job. Deleting this puts
+    that back the first time an old partition is read.
+    """
+    columns = {r[0] for r in duck.execute(f"DESCRIBE SELECT * FROM {read}").fetchall()}
+    if WITHDRAWN in columns:
+        return read
+    return f"(SELECT *, {export_parquet.WITHDRAWN_NULL} FROM {read})"
+
+
+def _tag(key: str, gone, on: date) -> str:
+    """`withdrawn_on` for a rewrite that found `gone` missing upstream.
+
+    Reconciliation only ever learns that a certificate has stopped being
+    returned, so the date stored is the day this run looked: it was last seen
+    the run before. ADEME publishes nothing about the withdrawal itself.
+    """
+    ids = ", ".join(repr(str(n)) for n in sorted(gone))
+    return f"CASE WHEN {key} IN ({ids}) THEN DATE '{on}' ELSE {WITHDRAWN} END"
 
 
 def merge_partition(
@@ -226,6 +261,7 @@ def merge_partition(
     out: Path,
     source: Source = EXISTANT,
     gone: "set[str] | tuple" = (),
+    on: date | None = None,
 ) -> int:
     """Rewrite one partition as (base minus the delta's ids, minus `gone`) plus
     the delta.
@@ -237,10 +273,13 @@ def merge_partition(
     numero_dpe, and anti-joining on it would delete a changed step's siblings.
 
     `gone` are the ids reconciliation found upstream no longer has. They are
-    removed in the same rewrite as the additions rather than in a pass of their
+    TAGGED in the same rewrite as the additions rather than in a pass of their
     own, which would mean a second whole copy of the tree on the runner's disk.
+    Tagged, not deleted: ADEME's view simply stops returning a withdrawn
+    certificate, and deleting it here made it vanish twice. See ADR-0044.
     """
     key = source.mapping.key
+    on = on or date.today()
     for kind, row_group, columns, order in (
         ("dpe", DPE_ROW_GROUP, "*", key),
         ("search", SEARCH_ROW_GROUP, *_search(source)),
@@ -253,35 +292,40 @@ def merge_partition(
         dest = out / kind / f"dept={dept}" / "part-0000.parquet"
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-        where = []
+        # A row the delta re-supplies is an UPDATE, not a withdrawal, and its
+        # fresh row carries no tag -- which is how a certificate that leaves
+        # ADEME and comes back clears its own. See ADR-0044.
+        where = ""
         if has_delta:
-            where.append(f"{key} NOT IN (SELECT {key} FROM read_parquet('{delta_file}'))")
-        if gone:
-            where.append(f"{key} NOT IN ({', '.join(repr(str(n)) for n in sorted(gone))})")
+            where = f" WHERE {key} NOT IN (SELECT {key} FROM read_parquet('{delta_file}'))"
 
         # TRAP: hive_partitioning = false on every SELECT *. The files live
         # under `dept=NN/`, which DuckDB otherwise reads as a `dept` column,
         # and this rewrite would store it: a 229th column the export never
         # wrote, in every partition a weekly delta touches.
-        kept = (
-            f"SELECT * FROM read_parquet('{base_file}', hive_partitioning = false)"
-            + (f" WHERE {' AND '.join(where)}" if where else "")
-        )
+        base_read = _wide(duck, f"read_parquet('{base_file}', hive_partitioning = false)")
+        kept = f"SELECT * FROM {base_read}{where}"
         if has_delta:
             kept += (
                 " UNION ALL BY NAME"
                 f" SELECT * FROM read_parquet('{delta_file}', hive_partitioning = false)"
             )
+        tagged = kept
+        if gone:
+            tagged = f"SELECT * REPLACE ({_tag(key, gone, on)} AS {WITHDRAWN}) FROM ({kept})"
         duck.execute(
             f"""COPY (
-                  SELECT {columns} FROM ({kept})
+                  SELECT {columns} FROM ({tagged})
                   ORDER BY {order}
                 ) TO '{dest}'
                 (FORMAT parquet, {export_parquet.COMPRESSION}, ROW_GROUP_SIZE {row_group})"""
         )
 
+    # Live rows, not rows in the file: this is the number reconcile compares
+    # against ADEME's own count. See ADR-0044.
     return duck.execute(
         f"SELECT COUNT(*) FROM read_parquet('{out / 'dpe' / f'dept={dept}' / 'part-0000.parquet'}')"
+        f" WHERE {WITHDRAWN} IS NULL"
     ).fetchone()[0]
 
 
@@ -293,6 +337,7 @@ def merge(
     *,
     deleted: dict[str, list[str]] | None = None,
     keep_mark: bool = False,
+    on: date | None = None,
 ) -> list[str]:
     """Merge every partition the delta touched. Returns the ones rewritten.
 
@@ -309,6 +354,9 @@ def merge(
     base_manifest = read_manifest(base)
     delta_manifest = read_manifest(delta_dir)
     deleted = {d: set(g) for d, g in (deleted or {}).items() if g}
+    # Once for the whole run: a job that starts before midnight UTC and rewrites
+    # its last partition after it would otherwise tag one week with two dates.
+    on = on or date.today()
 
     touched = sorted({p["dept"] for p in delta_manifest["partitions"]} | set(deleted))
     duck = duckdb.connect()
@@ -319,7 +367,7 @@ def merge(
         dept = part["dept"]
         if dept in touched:
             rows[dept] = merge_partition(
-                duck, base, delta_dir, dept, out, source, gone=deleted.get(dept, ())
+                duck, base, delta_dir, dept, out, source, gone=deleted.get(dept, ()), on=on
             )
         else:
             for kind in ("dpe", "search"):
@@ -427,12 +475,18 @@ class Divergence:
 
 
 def _published_ids(duck, root: Path | str, dept: str, key: str = "numero_dpe") -> list[str]:
+    """What this tree holds that ADEME should still have.
+
+    TRAP: a withdrawn certificate is tagged and stays in the file (ADR-0044).
+    Counted as published it is reported `gone` again every week, re-tagged with
+    a new date, and `rows` walks down by one each run until the partition reads
+    as empty. Deleting the filter is exactly that bug.
+    """
     path = _url(root, "dpe", f"dept={dept}", "part-0000.parquet")
+    read = _wide(duck, f"read_parquet('{path}', hive_partitioning = false)")
     return [
         r[0]
-        for r in duck.execute(
-            f"SELECT {key} FROM read_parquet('{path}')"
-        ).fetchall()
+        for r in duck.execute(f"SELECT {key} FROM {read} WHERE {WITHDRAWN} IS NULL").fetchall()
     ]
 
 
@@ -572,15 +626,21 @@ def reconcile(
 
 
 def apply_deletions(
-    root: Path | str, report: dict[str, Divergence], out: Path, source: Source = EXISTANT
+    root: Path | str,
+    report: dict[str, Divergence],
+    out: Path,
+    source: Source = EXISTANT,
+    on: date | None = None,
 ) -> list[str]:
     """Rewrite every partition that lost rows, and carry the rest over.
 
-    Only deletions. Certificates that APPEARED upstream come back through the
-    ordinary delta path, which already knows how to normalise a full record --
-    reconciliation only ever sees an id.
+    The rows are tagged, not deleted (ADR-0044). Only withdrawals: certificates
+    that APPEARED upstream come back through the ordinary delta path, which
+    already knows how to normalise a full record -- reconciliation only ever
+    sees an id.
     """
     out = Path(out)
+    on = on or date.today()
     out.mkdir(parents=True, exist_ok=True)
     manifest = read_manifest(root)
     duck = duckdb.connect()
@@ -604,11 +664,12 @@ def apply_deletions(
             if not gone:
                 _copy(src, dest)
                 continue
-            ids = ", ".join(f"'{n}'" for n in gone)
             # hive_partitioning = false, for the reason in merge_partition.
+            read = _wide(duck, f"read_parquet('{src}', hive_partitioning = false)")
             duck.execute(
-                f"COPY (SELECT {columns} FROM read_parquet('{src}', hive_partitioning = false)"
-                f" WHERE {key} NOT IN ({ids}) ORDER BY {order}) TO '{dest}'"
+                f"COPY (SELECT {columns} FROM"
+                f" (SELECT * REPLACE ({_tag(key, gone, on)} AS {WITHDRAWN}) FROM {read})"
+                f" ORDER BY {order}) TO '{dest}'"
                 f" (FORMAT parquet, {export_parquet.COMPRESSION}, ROW_GROUP_SIZE {row_group})"
             )
         if gone:
@@ -663,15 +724,25 @@ def _by_date(
     date at all buckets as ''.
 
     Rows in the temporary table `gone` are left out, because this count is
-    compared against ADEME and those rows are about to be deleted from it.
+    compared against ADEME and those rows are about to be tagged out of it. So
+    are the rows an earlier run already tagged, for the same reason (ADR-0044).
+
+    union_by_name, because the partitions are not all of one age: one that no
+    run has rewritten since ADR-0044 has no `withdrawn_on`, and a plain scan of
+    a mixed list is a Binder Error.
     """
     scan = ", ".join(f"'{f}'" for f in files)
-    where = f' WHERE "{key}" NOT IN (SELECT id FROM gone)' if key else ""
+    read = _wide(
+        duck, f"read_parquet([{scan}], hive_partitioning = false, union_by_name = true)"
+    )
+    where = [f"{WITHDRAWN} IS NULL"]
+    if key:
+        where.append(f'"{key}" NOT IN (SELECT id FROM gone)')
     return {
         bucket: n
         for bucket, n in duck.execute(
             f"SELECT COALESCE(substr(CAST(\"{modified}\" AS VARCHAR), 1, {width}), '') AS bucket,"
-            f" COUNT(*) FROM read_parquet([{scan}], hive_partitioning = false){where} GROUP BY 1"
+            f" COUNT(*) FROM {read} WHERE {' AND '.join(where)} GROUP BY 1"
         ).fetchall()
     }
 
@@ -865,6 +936,7 @@ def heal(
     max_repair: int = MAX_REPAIR,
     quiet: bool = True,
     work: Path | None = None,
+    on: date | None = None,
 ) -> Healed:
     """Find the holes on both axes, fetch what is missing and write the tree.
 
@@ -921,9 +993,9 @@ def heal(
         duck.close()
 
     if delta_dir is not None:
-        touched = merge(root, delta_dir, out, source, deleted=gone, keep_mark=True)
+        touched = merge(root, delta_dir, out, source, deleted=gone, keep_mark=True, on=on)
     elif gone:
-        touched = apply_deletions(root, report, out, source)
+        touched = apply_deletions(root, report, out, source, on=on)
     else:
         touched = []
     return Healed(fetched=sorted(ids), gone=gone, touched=touched)

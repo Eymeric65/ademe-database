@@ -434,7 +434,9 @@ def test_search_file_has_exactly_the_declared_columns_and_is_sorted(exported):
             f"SELECT name FROM parquet_schema('{path}') WHERE type IS NOT NULL"
         ).fetchall()
     ]
-    assert names == list(export_parquet.SEARCH_COLUMNS)
+    # The tag comes last, so a result can say a certificate was withdrawn
+    # without opening the wide file. See ADR-0044.
+    assert names == [*export_parquet.SEARCH_COLUMNS, export_parquet.WITHDRAWN]
 
     values = [
         r[0]
