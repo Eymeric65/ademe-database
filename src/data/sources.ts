@@ -367,7 +367,12 @@ export function searchQuery(
   const list = files.map((f) => `'${f.replace(/'/g, "''")}'`).join(', ')
   const filter = `WHERE ${where.length ? where.join(' AND ') : 'TRUE'}`
   if (shape === 'count') {
-    return { sql: `SELECT count(*) AS n FROM read_parquet([${list}], hive_partitioning = false) ${filter}`, params }
+    return {
+      sql:
+        `SELECT count(*) AS n FROM read_parquet([${list}],` +
+        ` hive_partitioning = false, ${UNION_BY_NAME}) ${filter}`,
+      params,
+    }
   }
 
   // Closeness on surface first: an advert rounds, so the nearest area is the
@@ -380,7 +385,7 @@ export function searchQuery(
 
   const sql =
     `SELECT *, count(*) OVER () AS total` +
-    ` FROM read_parquet([${list}], hive_partitioning = false, filename = true)` +
+    ` FROM read_parquet([${list}], hive_partitioning = false, filename = true, ${UNION_BY_NAME})` +
     ` ${filter} ${order} LIMIT ${LIMIT}`
   return { sql, params }
 }
@@ -398,6 +403,8 @@ export type Hit = {
   classe: string | null
   ges: string | null
   date: string | null
+  /** The day a weekly run found it gone from ADEME, or null while it is live. */
+  withdrawn: string | null
   surface: number | null
   kind: string | null
   etape: string | null
@@ -433,6 +440,18 @@ export function formatDate(value: unknown): string {
   return `${d}/${m}/${y}`
 }
 
+/** The tag ADR-0044 put on a certificate ADEME stopped returning. */
+export const WITHDRAWN = 'withdrawn_on'
+
+/**
+ * TRAP: the files in one scan are not all of one age. Only the partitions a
+ * weekly run rewrites gain `withdrawn_on`, and a paid member reads a base file
+ * and a recent one together (ADR-0039), so one query can name both. Without
+ * this, DuckDB refuses the whole scan and the search returns nothing at all --
+ * not a missing column, no results.
+ */
+const UNION_BY_NAME = 'union_by_name = true'
+
 export function toHit(src: Source, row: Record<string, unknown>): Hit {
   const file = typeof row.filename === 'string' ? row.filename : ''
   return {
@@ -445,6 +464,7 @@ export function toHit(src: Source, row: Record<string, unknown>): Hit {
     classe: str(row[src.classCol]),
     ges: str(row[src.gesCol]),
     date: isoDate(row[src.dateCol]),
+    withdrawn: isoDate(row[WITHDRAWN]),
     surface: num(row[src.surface.col]),
     kind: str(row[src.kindCol]),
     etape: src.id === 'audit' ? str(row.etape_travaux) : null,

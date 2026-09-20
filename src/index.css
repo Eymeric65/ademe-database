@@ -696,6 +696,28 @@ h1 {
   color: var(--color-muted);
 }
 
+/* Vermilion, like the seal: a cancellation stamp is the one other thing that
+   ink marks a document with. Muted would read as one more fact about the
+   dwelling, and this is a fact about the certificate. See ADR-0044. */
+.hit-withdrawn {
+  margin: 0.3rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-vermilion);
+}
+
+.withdrawn {
+  margin: 0.8rem 0 0;
+  padding: 0.6rem 0.9rem;
+  border-left: 3px solid var(--ink-vermilion);
+  background: var(--ink-vermilion-soft);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--color-text);
+}
+
 .hit-map,
 .back {
   display: inline-block;

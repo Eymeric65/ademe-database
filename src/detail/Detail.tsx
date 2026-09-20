@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { buildings, detail, manifest, type Building, type Record_ } from '../data/duck'
-import { formatDate, SOURCE, type Source } from '../data/sources'
+import { formatDate, SOURCE, WITHDRAWN, type Source } from '../data/sources'
 import type { DetailRef } from '../routes'
 import { area, Badge, mapsHref } from '../search/Results'
 import { field, formatValue } from './fields'
@@ -104,6 +104,10 @@ export function Detail({ record, paid }: { record: DetailRef; paid: boolean }) {
 
   const row = rec.row
   const address = render(row.adresse_ban) || record.key
+  // ADEME's view simply stops returning a withdrawn certificate, so this is
+  // the day a weekly run found it gone, not the day it was withdrawn. The
+  // record itself is kept whole -- see ADR-0044.
+  const withdrawn = formatDate(row[WITHDRAWN])
 
   async function toggle() {
     setBusy(true)
@@ -145,6 +149,9 @@ export function Detail({ record, paid }: { record: DetailRef; paid: boolean }) {
   const groups = new Map<string, [string, unknown][]>()
   for (const [key, value] of Object.entries(row)) {
     if (value == null || value === '') continue
+    // Ours, not ADEME's: it has no column_meta entry, so it would render as an
+    // unlabelled fact under a heading it does not belong to. It is the notice.
+    if (key === WITHDRAWN) continue
     const group = rec.meta[key]?.destination ?? 'dpe'
     const list = groups.get(group) ?? []
     list.push([key, value])
@@ -166,6 +173,12 @@ export function Detail({ record, paid }: { record: DetailRef; paid: boolean }) {
       <p className="eyebrow">{src.label}</p>
       <h1>{address}</h1>
       <p className="lede">{record.key}</p>
+      {withdrawn ? (
+        <p className="withdrawn">
+          {src.id === 'audit' ? 'Cet audit a' : 'Ce DPE a'} été retiré du registre ADEME le{' '}
+          {withdrawn}.
+        </p>
+      ) : null}
 
       <div className="summary">
         <div className="hit-labels">
