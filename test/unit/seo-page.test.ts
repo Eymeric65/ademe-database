@@ -143,7 +143,7 @@ describe('the slugs the pages are published at', () => {
     // From NAMES rather than from an aggregate: the slug is derived from the
     // name, so the names are the set that has to produce distinct URLs -- and
     // the aggregate is fetched from R2, not in the tree, so a test pinned to it
-    // would pass or fail on whether somebody had fetched it (ADR-0045).
+    // would pass or fail on whether somebody had fetched it (ADR-0046).
     const codes = Object.keys(NAMES)
     expect(codes.length).toBeGreaterThanOrEqual(101)
 

@@ -89,7 +89,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       # Read-only use of the weekly job's key, and only in this job: the e2e job
       # builds with no credentials on purpose, because that is the build a
-      # laptop does. See ADR-0045.
+      # laptop does. See ADR-0046.
       RCLONE_CONFIG_R2_TYPE: s3
       RCLONE_CONFIG_R2_PROVIDER: Cloudflare
       RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -108,7 +108,7 @@ jobs:
       # ships `dist/` whole, so a deploy that built without it would replace a
       # hundred and one indexed pages with the sample's two -- green, and
       # silent. The fetch is deliberately unguarded: a missing object or a wrong
-      # key fails the deploy instead. See ADR-0045.
+      # key fails the deploy instead. See ADR-0046.
       - name: Install rclone
         run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
       - name: Fetch the departement aggregate

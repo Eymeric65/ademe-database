@@ -14,6 +14,7 @@
 
 import { renderToStaticMarkup } from 'react-dom/server'
 import { NAMES, deptSlug } from '../data/sources'
+import { Presentation } from '../presentation/Presentation'
 
 export type ClassCounts = Record<string, number>
 
@@ -539,10 +540,122 @@ export function renderDepartementPage({
             </nav>
             <p className="note">
               <a href="/">recherche-maison</a> — le diagnostic public d’un logement, à partir de ce
-              qu’une annonce en dit.
+              qu’une annonce en dit. <a href="/presentation">Ce que contient la base</a>.
             </p>
           </footer>
         </div>
+      </body>
+    </html>,
+  )
+
+  return `<!doctype html>${markup}`
+}
+
+// --- the présentation, at a URL of its own ----------------------------------
+
+const PRES_URL = `${ORIGIN}/presentation`
+
+const PRES_TITLE = 'DPE : retrouver le diagnostic d’un logement à partir d’une annonce'
+
+// Under ~160 characters: past that the result is cut, and the cut lands badly.
+const PRES_DESCRIPTION =
+  'Une annonce affiche une lettre ; le DPE public dit l’adresse, la consommation ' +
+  'chiffrée et la date. Ce que contient la base, comment la chercher, et ses limites.'
+
+/**
+ * src/presentation/Presentation.tsx, as a page a crawler can read.
+ *
+ * It is ~300 lines of the best copy on the site and, as a hash route, no
+ * crawler has ever seen a word of it: #/presentation never leaves the browser.
+ * Rendering it here is safe because the component is prop-only and
+ * import-free -- no hook, no context, no fetch -- so renderToStaticMarkup
+ * takes it as it is.
+ *
+ * Unlike renderDepartementPage above, this page LINKS a stylesheet instead of
+ * inlining one: the pres-* and spec-* classes are ~400 lines of src/index.css,
+ * which Vite emits under a content hash. scripts/prerender.tsx reads that
+ * hashed name out of the built index.html and passes it in.
+ *
+ * Keyword copy lives in the title and the description here, never in the
+ * component: its headings also render under the gate on the landing page,
+ * where a second "DPE" heading makes a strict e2e selector match twice.
+ */
+export function renderPresentationPage({ stylesheet }: { stylesheet: string }): string {
+  const markup = renderToStaticMarkup(
+    <html lang="fr">
+      <head>
+        <meta charSet="utf-8" />
+        {/*
+          TRAP: this <base> is load-bearing, not tidiness. The component's two
+          calls to action are <a href="#/">, which on this page would otherwise
+          resolve to /presentation#/ -- a link back to itself. With the base,
+          a fragment-only href resolves against "/" and lands on the app. Every
+          other URL written here is root-absolute, so nothing else moves.
+        */}
+        <base href="/" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{PRES_TITLE}</title>
+        <meta name="description" content={PRES_DESCRIPTION} />
+        <link rel="canonical" href={PRES_URL} />
+        <meta property="og:title" content={PRES_TITLE} />
+        <meta property="og:description" content={PRES_DESCRIPTION} />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={PRES_URL} />
+        <meta property="og:locale" content="fr_FR" />
+        <meta property="og:site_name" content="recherche-maison" />
+        <meta name="twitter:card" content="summary" />
+        {/* Prussian blue, the same --color-accent src/index.css leads with. */}
+        <meta name="theme-color" content="#1f4e79" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link
+          rel="preload"
+          href="/fonts/fraunces-roman-latin.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link rel="stylesheet" href={stylesheet} />
+      </head>
+      <body>
+        <header className="masthead">
+          <a className="wordmark" href="/">
+            <span className="badge" data-letter="D" aria-hidden="true">
+              D
+            </span>
+            <span>recherche-maison</span>
+          </a>
+          <nav className="nav" aria-label="Principal">
+            <a href="/presentation" aria-current="page">
+              Présentation
+            </a>
+            <a href="/">Rechercher</a>
+          </nav>
+        </header>
+
+        <main>
+          {/*
+            TRAP: signedIn does NOT claim anybody is signed in -- this page has
+            no session and ships no JavaScript. It only picks how the two calls
+            to action render, and the other branch is <button onClick>, which
+            is completely inert here. Two dead buttons on a public landing page
+            is the worse outcome; a link into the app is the point.
+          */}
+          <Presentation hero signedIn onSignIn={() => {}} />
+
+          <footer className="pres-foot">
+            <p>
+              <a href="/">recherche-maison</a> — le diagnostic public d’un logement, à partir de ce
+              qu’une annonce en dit.
+            </p>
+            <p>
+              Données : ADEME, publiées sous{' '}
+              <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence">
+                Licence Ouverte / Open Licence (Etalab)
+              </a>
+              .
+            </p>
+          </footer>
+        </main>
       </body>
     </html>,
   )
