@@ -206,6 +206,8 @@ jobs:
       RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       PYTHONUNBUFFERED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -236,3 +238,27 @@ jobs:
       - name: Upload
         if: ${{ !inputs.dry_run }}
         run: rclone copyto publish/v1/aggregates.json r2:ademe-dpe/v1/aggregates.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      # Same pin, same reason as ci.yml's node job: Node 22 ships npm 10, which
+      # will not `npm ci` this lock.
+      - run: npm install -g npm@11
+      - run: npm ci
+      # The aggregate this job has just built, rather than a round trip through
+      # the bucket: it is the same bytes, and a fetch here could read a stale
+      # object if the upload above was skipped.
+      - run: cp publish/v1/aggregates.json src/seo/aggregates.json
+      - run: npm run build
+
+      # TRAP: a bare `wrangler deploy` is production -- the top-level config and
+      # recherche-maison.com. That is what this job is for: a scheduled run
+      # checks out the default branch, which is main, so the code deployed here
+      # is the code already in production and only the numbers have moved.
+      # `workflow_dispatch` runs from whatever branch it was launched on, which
+      # is why the ref is checked rather than assumed.
+      - name: Deploy the refreshed pages
+        if: ${{ github.ref == 'refs/heads/main' && !inputs.dry_run }}
+        run: npx wrangler deploy

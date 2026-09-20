@@ -314,3 +314,46 @@ def test_the_aggregate_is_uploaded_beside_the_manifest_and_not_on_a_dry_run():
     for step in upload:
         guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
         assert guard and "!inputs.dry_run" in guard.group(1), "a dry run publishes the aggregate"
+def test_the_weekly_deploy_is_production_and_only_ever_from_main():
+    """TRAP: `workflow_dispatch` runs from whatever branch it was launched on.
+    Unguarded, a dispatch from a feature branch would build that branch and put
+    it on recherche-maison.com. The schedule runs on the default branch, which
+    is main, and that is the only ref this may deploy."""
+    for step in _pages_steps():
+        run = re.search(r"run:\s*npx wrangler deploy\b(.*)$", step, re.M)
+        if not run:
+            continue
+        assert run.group(1).strip() == "", "the weekly run deploys somewhere other than production"
+        guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
+        assert guard, "unguarded `wrangler deploy` in the weekly run"
+        assert "github.ref == 'refs/heads/main'" in guard.group(1), guard.group(1)
+        assert "!inputs.dry_run" in guard.group(1), "a dry run deploys"
+
+
+def test_the_deploy_fetches_the_aggregate_before_it_builds():
+    """`vite build` prerenders the departement pages from whatever aggregate is
+    on disk, and ASSETS ships `dist/` whole. Fetched after the build -- or not at
+    all -- the deploy replaces a hundred and one indexed pages with nothing."""
+    deploy = _ci_jobs()["deploy"]
+    fetch = deploy.find("r2:ademe-dpe/v1/aggregates.json")
+    build = deploy.find("npm run build")
+    assert fetch >= 0, "the deploy never fetches the aggregate"
+    assert build >= 0, "the deploy never builds"
+    assert fetch < build, "the aggregate is fetched after the build that needed it"
+
+
+def test_the_fetch_is_not_allowed_to_fail_quietly():
+    """A fetch that fell back to the sample on a missing object would deploy two
+    pages over a hundred and one, green. The step carries no `|| true`, no
+    `continue-on-error`, and no `if:` that would skip it on a push."""
+    step = next(s for s in _ci_jobs()["deploy"].split("      - ") if "aggregates.json" in s)
+    assert "|| true" not in step and "continue-on-error" not in step
+    assert not re.search(r"^\s*if:", step, re.M), "the fetch is skippable"
+
+
+def test_the_bucket_credentials_reach_only_the_job_that_deploys():
+    """The e2e job builds with no credentials on purpose: it is the proof that a
+    build without them still produces pages. A key in every job would make that
+    proof impossible to keep."""
+    holders = {name for name, job in _ci_jobs().items() if "RCLONE_CONFIG_R2_" in job}
+    assert holders == {"deploy"}, f"bucket credentials in {holders}"
