@@ -1,0 +1,21 @@
+<!--
+  The label ramp, at 16 px: an ink block with three rungs of the official DPE
+  scale climbing across it. Colours are the primitives from src/index.css --
+  --prussian-ink for the block, --dpe-a / --dpe-d / --dpe-g for the rungs.
+  Seven rungs would be mush at this size; three still read as a staircase.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 32 32"
+  width="32"
+  height="32"
+  role="img"
+  aria-label="recherche-maison"
+>
+  <rect width="32" height="32" rx="3" fill="#1f4e79" />
+  <g>
+    <rect x="5" y="7" width="11" height="5" rx="1" fill="#319834" />
+    <rect x="5" y="14" width="16" height="5" rx="1" fill="#fbfe06" />
+    <rect x="5" y="21" width="22" height="5" rx="1" fill="#fc0205" />
+  </g>
+</svg>
