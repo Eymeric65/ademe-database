@@ -50,7 +50,9 @@ def test_each_source_is_its_own_job_one_at_a_time():
     """A matrix without `max-parallel: 1` fetches every source at once from one
     address; with `fail-fast` left on, one source failing cancels the rest."""
     jobs = _jobs()
-    assert list(jobs) == ["source"], f"expected the one matrix job, got {list(jobs)}"
+    # `pages` rebuilds the aggregate once the sources are done, and is not one
+    # of the per-source legs. See ADR-0046.
+    assert list(jobs) == ["source", "pages"], f"unexpected jobs: {list(jobs)}"
     job = jobs["source"]
     assert re.search(r"^      max-parallel: 1$", job, re.M), "source jobs may run side by side"
     assert re.search(r"^      fail-fast: false$", job, re.M), "one source failing cancels the others"
@@ -267,10 +269,48 @@ def test_a_recovery_run_can_be_told_how_many_hole_days_to_chase():
     """`MAX_HOLE_DAYS` stops a scheduled run that found a republication rather
     than a hole. A tree that has never been repaired trips it too, and until
     the cap was a dispatch input the only way past it was to edit the constant
-    and push. It is a dial beside `max_repair` now. See ADR-0045."""
+    and push. It is a dial beside `max_repair` now. See ADR-0046."""
     text = _text()
     assert re.search(
         r"^      max_hole_days:\n(?:        .*\n)*?        default: '\d+'$", text, re.M
     ), "no max_hole_days input"
     step = next(s for s in _steps() if "scripts/reconcile.py" in s)
     assert "--max-hole-days" in step, "the input never reaches the repair"
+
+
+# The aggregate behind the public departement pages is rebuilt from the tree the
+# weekly run has just published, put on R2 beside the manifest, and fetched by
+# every build. See ADR-0046.
+
+
+def _pages_steps() -> list[str]:
+    return re.split(r"^      - ", _jobs()["pages"], flags=re.M)[1:]
+
+
+def test_the_aggregate_is_rebuilt_from_the_published_tree_after_every_source():
+    """Not a step inside the matrix leg: that leg is one source at a time and
+    Python-only, and a quiet week still has to refresh the pages. The job reads
+    `search/` alone -- the narrow tree -- never `dpe/`."""
+    jobs = _jobs()
+    assert "pages" in jobs, "etl-weekly.yml never rebuilds the aggregate"
+    assert re.search(r"^    needs: source$", jobs["pages"], re.M), "the aggregate is built first"
+    text = jobs["pages"]
+    download = re.search(r"rclone copy r2:ademe-dpe/v1/search\s", text)
+    manifest = re.search(r"rclone copyto r2:ademe-dpe/v1/manifest\.json\s", text)
+    build = text.find("ademe.aggregate")
+    assert download and manifest, "the published tree is never downloaded"
+    assert build > 0, "the aggregate is never built"
+    assert max(download.start(), manifest.start()) < build, "built before it is downloaded"
+    assert "r2:ademe-dpe/v1/dpe" not in text, "the wide tree is downloaded for nothing"
+
+
+def test_the_aggregate_is_uploaded_beside_the_manifest_and_not_on_a_dry_run():
+    """`publish/` mirrors the bucket here too, so
+    `test_every_upload_is_from_the_split_tree_to_the_same_path` covers it."""
+    out = re.search(r"--out publish/v1/aggregates\.json", _jobs()["pages"])
+    assert out, "the aggregate is not written to the path it is uploaded from"
+    upload = [s for s in _pages_steps() if "r2:ademe-dpe/v1/aggregates.json" in s]
+    assert upload, "the aggregate is never uploaded"
+    for step in upload:
+        guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
+        assert guard and "!inputs.dry_run" in guard.group(1), "a dry run publishes the aggregate"

@@ -15,6 +15,11 @@ playwright-report
 # does not belong in git. See ADR-0009.
 test/e2e/fixtures/vendor
 
+# The departement aggregate: built by the weekly job from the published tree,
+# fetched from R2 by every build. `src/seo/aggregates.sample.json` is the
+# committed fixture a build with no credentials falls back to. See ADR-0046.
+src/seo/aggregates.json
+
 __pycache__
 .pytest_cache
 .venv
