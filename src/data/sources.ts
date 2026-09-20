@@ -246,7 +246,7 @@ export function parcelDept(parcelId: string): string {
   return parcelId.startsWith('97') ? parcelId.slice(0, 3) : parcelId.slice(0, 2)
 }
 
-const NAMES: Record<string, string> = {
+export const NAMES: Record<string, string> = {
   '01': 'Ain', '02': 'Aisne', '03': 'Allier', '04': 'Alpes-de-Haute-Provence', '05': 'Hautes-Alpes',
   '06': 'Alpes-Maritimes', '07': 'Ardèche', '08': 'Ardennes', '09': 'Ariège', '10': 'Aube',
   '11': 'Aude', '12': 'Aveyron', '13': 'Bouches-du-Rhône', '14': 'Calvados', '15': 'Cantal',
@@ -269,6 +269,24 @@ const NAMES: Record<string, string> = {
   '971': 'Guadeloupe', '972': 'Martinique', '973': 'Guyane', '974': 'La Réunion',
   '975': 'Saint-Pierre-et-Miquelon', '976': 'Mayotte', '977': 'Saint-Barthélemy', '978': 'Saint-Martin',
   '988': 'Nouvelle-Calédonie',
+}
+
+/**
+ * The path a prerendered département page is published at, from its name.
+ *
+ * TRAP: the names above carry accents AND typographic apostrophes -- Ariège,
+ * Côte-d’Or, Val-d’Oise. A plain [^a-z0-9] pass leaves `ari-ge`, so the
+ * decomposition has to happen first; aliasFor() in scripts/preview.ts does
+ * neither and must not be reused here. Corsica is 2A/2B, so the code is not
+ * always two digits.
+ */
+export function deptSlug(code: string): string {
+  return (NAMES[code] ?? code)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
 }
 
 /** The Département select: every searchable partition, NG excluded. */
