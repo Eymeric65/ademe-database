@@ -1388,6 +1388,22 @@ a.signin {
 }
 
 /*
+ * Only the prerendered /presentation carries this: in the app the masthead and
+ * the gate are the frame, and there is no footer. See src/seo/page.tsx.
+ */
+.pres-foot {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+.pres-foot p {
+  margin: 0 0 0.35rem;
+}
+
+/*
  * The specimen: an invented listing and the certificate behind it, stacked in
  * one grid cell so the certificate overlaps the listing like a sheet laid on
  * top of it. The yellow D is the only thing the two share.

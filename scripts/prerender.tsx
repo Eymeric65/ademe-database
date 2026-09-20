@@ -1,5 +1,6 @@
 /**
- * Turns src/seo/aggregates.json into dist/departement/*.html and dist/sitemap.xml.
+ * Turns src/seo/aggregates.json into dist/departement/*.html, renders
+ * dist/presentation.html, and writes the one dist/sitemap.xml covering both.
  *
  * Why this exists: src/routes.ts is a hash router, so the whole app is one URL
  * to a crawler and the domain has exactly one indexable page. These static
@@ -16,7 +17,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { NAMES, deptSlug } from '../src/data/sources'
 import type { DepartementAggregate } from '../src/seo/page'
-import { ORIGIN, renderDepartementPage } from '../src/seo/page'
+import { ORIGIN, renderDepartementPage, renderPresentationPage } from '../src/seo/page'
 
 export { ORIGIN }
 
@@ -31,6 +32,30 @@ type Aggregates = {
 // ever touched this file.
 const aggregatesPath = fileURLToPath(new URL('../src/seo/aggregates.json', import.meta.url))
 const distDir = fileURLToPath(new URL('../dist/', import.meta.url))
+
+/**
+ * The app's stylesheet, as the built index.html records it.
+ *
+ * Vite emits src/index.css under a content hash, and /presentation has to link
+ * it: the pres-* and spec-* classes are ~400 lines and are not being inlined.
+ *
+ * TRAP: read off index.html, never globbed out of dist/assets. A glob is right
+ * only while there is exactly one stylesheet, and silently picks the wrong
+ * file the day a second one appears. index.html is the authoritative record of
+ * which one the app actually loads.
+ */
+export function stylesheetHref(indexHtml: string): string {
+  const href = /<link\b[^>]*\brel=["']?stylesheet["']?[^>]*>/i
+    .exec(indexHtml)?.[0]
+    ?.match(/\bhref=["']([^"']+)["']/i)?.[1]
+  if (!href) {
+    throw new Error(
+      'prerender: no <link rel="stylesheet"> in the built index.html; ' +
+        'refusing to write an unstyled /presentation',
+    )
+  }
+  return href
+}
 
 /**
  * Writes the pages and the sitemap under `outDir`, and returns the paths
@@ -71,6 +96,16 @@ export function prerenderInto(outDir: string): { pages: string[] } {
     pages.push(`departement/${slug}`)
   }
 
+  // The Présentation, at an address a crawler can reach. It is the only page
+  // here that links a stylesheet rather than inlining one, so it is also the
+  // only one that needs the build's own index.html.
+  const indexHtml = readFileSync(`${root}index.html`, 'utf8')
+  writeFileSync(
+    `${root}presentation.html`,
+    renderPresentationPage({ stylesheet: stylesheetHref(indexHtml) }),
+  )
+  pages.push('presentation')
+
   const locs = ['/', ...pages.map((p) => `/${p}`)]
   const sitemap =
     '<?xml version="1.0" encoding="UTF-8"?>\n' +
@@ -89,7 +124,7 @@ export function prerenderInto(outDir: string): { pages: string[] } {
 
 function main(): void {
   const { pages } = prerenderInto(distDir)
-  console.log(`wrote ${pages.length} département page(s) and dist/sitemap.xml`)
+  console.log(`wrote ${pages.length} page(s) and dist/sitemap.xml`)
 }
 
 if (process.argv[1]?.endsWith('prerender.tsx')) main()
