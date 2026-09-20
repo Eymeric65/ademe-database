@@ -55,7 +55,7 @@ jobs:
     runs-on: ubuntu-latest
     # Four hours, not two: run 34829784527 was cancelled at exactly 120 minutes
     # reconciling audits, and a source's own runner means a raised ceiling costs
-    # the other three nothing. See ADR-0045.
+    # the other three nothing. See ADR-0046.
     timeout-minutes: 240
     # The published trees are read from R2 with the job's own key, never over a
     # public URL: the bucket's public domain is what let the login gate be
@@ -185,3 +185,54 @@ jobs:
           name: delta-manifest-${{ matrix.source }}
           path: publish/${{ env.TREE }}/manifest.json
           retention-days: 30
+
+  # The hundred and one public departement pages are prerendered from one
+  # aggregate of the published `search/` tree. It is rebuilt here, next to the
+  # run that publishes the tree, rather than in the site build: the build has no
+  # credentials for the bucket and computing it is ~7 DuckDB queries over 103
+  # partitions plus a national scan, for numbers that move once a week.
+  #
+  # A job of its own, not a step in the matrix leg above: that leg is Python
+  # only, one source at a time, and skipped entirely for a source that is not
+  # published yet -- and a quiet week still has to refresh the pages. See
+  # ADR-0046.
+  pages:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+
+      - name: Install rclone
+        run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
+
+      # `search/` alone -- the narrow tree, ~400 MB against several gigabytes
+      # for `dpe/`. The aggregate reads nine of its columns and no other file.
+      # The manifest last, as everywhere: it names the partitions, and the
+      # aggregate enumerates them from it rather than globbing the directory.
+      - name: Download the published search tree
+        run: |
+          rclone copy r2:ademe-dpe/v1/search tree/v1/search
+          rclone copyto r2:ademe-dpe/v1/manifest.json tree/v1/manifest.json
+
+      # Into `publish/`, which mirrors the bucket here as it does in the source
+      # job, so the upload below lands at the key it was written for.
+      - name: Aggregate every departement
+        run: |
+          uv run python -m ademe.aggregate --root tree/v1 --out publish/v1/aggregates.json
+          rm -rf tree
+
+      - name: Upload
+        if: ${{ !inputs.dry_run }}
+        run: rclone copyto publish/v1/aggregates.json r2:ademe-dpe/v1/aggregates.json

@@ -1,0 +1,428 @@
+{
+ "version": "v1",
+ "source": "existant",
+ "built_at": "2026-09-20T11:37:10+00:00",
+ "data_built_at": "2026-09-11T04:15:59+00:00",
+ "high_water": "2026-09-07",
+ "classes": [
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G"
+ ],
+ "national": {
+  "certificates": 15548832,
+  "etiquette_dpe": {
+   "A": 233425,
+   "B": 775195,
+   "C": 5714289,
+   "D": 4835004,
+   "E": 2474561,
+   "F": 966961,
+   "G": 549397
+  },
+  "etiquette_ges": {
+   "A": 2451187,
+   "B": 3492069,
+   "C": 4638601,
+   "D": 2802837,
+   "E": 1356540,
+   "F": 591614,
+   "G": 215984
+  },
+  "passoires": {
+   "count": 1516358,
+   "classed": 15548832,
+   "share": 0.0975
+  },
+  "conso_ep_kwh_m2": {
+   "counted": 15547397,
+   "p25": 132.9,
+   "median": 184.2,
+   "p75": 248.8
+  },
+  "surface_m2": {
+   "counted": 15143501,
+   "median": 66.0
+  },
+  "periode_construction": [
+   {
+    "label": "1948-1974",
+    "count": 4905624
+   },
+   {
+    "label": "avant 1948",
+    "count": 4109987
+   },
+   {
+    "label": "1989-2000",
+    "count": 1442489
+   },
+   {
+    "label": "2006-2012",
+    "count": 1114888
+   },
+   {
+    "label": "2013-2021",
+    "count": 1051028
+   },
+   {
+    "label": "1978-1982",
+    "count": 837178
+   },
+   {
+    "label": "1983-1988",
+    "count": 737768
+   },
+   {
+    "label": "1975-1977",
+    "count": 647751
+   },
+   {
+    "label": "2001-2005",
+    "count": 517711
+   },
+   {
+    "label": "après 2021",
+    "count": 184408
+   }
+  ],
+  "type_batiment": [
+   {
+    "label": "appartement",
+    "count": 10516890
+   },
+   {
+    "label": "maison",
+    "count": 4629755
+   },
+   {
+    "label": "immeuble",
+    "count": 402187
+   }
+  ],
+  "par_annee": [
+   {
+    "year": 2021,
+    "count": 692231
+   },
+   {
+    "year": 2022,
+    "count": 2398193
+   },
+   {
+    "year": 2023,
+    "count": 3639867
+   },
+   {
+    "year": 2024,
+    "count": 3730292
+   },
+   {
+    "year": 2025,
+    "count": 3227352
+   },
+   {
+    "year": 2026,
+    "count": 1860897
+   }
+  ],
+  "communes": [
+   {
+    "code_insee": "31555",
+    "nom": "Toulouse",
+    "count": 189748
+   },
+   {
+    "code_insee": "44109",
+    "nom": "Nantes",
+    "count": 132088
+   },
+   {
+    "code_insee": "33063",
+    "nom": "Bordeaux",
+    "count": 110716
+   }
+  ]
+ },
+ "departements": {
+  "09": {
+   "dept": "09",
+   "publishable": true,
+   "certificates": 31157,
+   "etiquette_dpe": {
+    "A": 505,
+    "B": 1515,
+    "C": 9311,
+    "D": 9121,
+    "E": 5734,
+    "F": 2830,
+    "G": 2141
+   },
+   "etiquette_ges": {
+    "A": 6314,
+    "B": 8655,
+    "C": 7978,
+    "D": 4112,
+    "E": 2396,
+    "F": 1170,
+    "G": 532
+   },
+   "passoires": {
+    "count": 4971,
+    "classed": 31157,
+    "share": 0.1595
+   },
+   "conso_ep_kwh_m2": {
+    "counted": 31157,
+    "p25": 146.9,
+    "median": 203.7,
+    "p75": 276.0
+   },
+   "surface_m2": {
+    "counted": 30322,
+    "median": 79.3
+   },
+   "periode_construction": [
+    {
+     "label": "avant 1948",
+     "count": 11411
+    },
+    {
+     "label": "1948-1974",
+     "count": 10263
+    },
+    {
+     "label": "2006-2012",
+     "count": 1986
+    },
+    {
+     "label": "1989-2000",
+     "count": 1814
+    },
+    {
+     "label": "2001-2005",
+     "count": 1508
+    },
+    {
+     "label": "1978-1982",
+     "count": 1333
+    },
+    {
+     "label": "1983-1988",
+     "count": 1205
+    },
+    {
+     "label": "2013-2021",
+     "count": 826
+    },
+    {
+     "label": "1975-1977",
+     "count": 617
+    },
+    {
+     "label": "après 2021",
+     "count": 194
+    }
+   ],
+   "type_batiment": [
+    {
+     "label": "maison",
+     "count": 17316
+    },
+    {
+     "label": "appartement",
+     "count": 13025
+    },
+    {
+     "label": "immeuble",
+     "count": 816
+    }
+   ],
+   "par_annee": [
+    {
+     "year": 2021,
+     "count": 2242
+    },
+    {
+     "year": 2022,
+     "count": 5763
+    },
+    {
+     "year": 2023,
+     "count": 7350
+    },
+    {
+     "year": 2024,
+     "count": 6730
+    },
+    {
+     "year": 2025,
+     "count": 5292
+    },
+    {
+     "year": 2026,
+     "count": 3780
+    }
+   ],
+   "communes": [
+    {
+     "code_insee": "09225",
+     "nom": "Pamiers",
+     "count": 5094
+    },
+    {
+     "code_insee": "09122",
+     "nom": "Foix",
+     "count": 3247
+    },
+    {
+     "code_insee": "09261",
+     "nom": "Saint-Girons",
+     "count": 1923
+    }
+   ]
+  },
+  "31": {
+   "dept": "31",
+   "publishable": true,
+   "certificates": 344411,
+   "etiquette_dpe": {
+    "A": 9017,
+    "B": 30101,
+    "C": 177192,
+    "D": 80097,
+    "E": 32471,
+    "F": 11063,
+    "G": 4470
+   },
+   "etiquette_ges": {
+    "A": 111809,
+    "B": 70959,
+    "C": 94601,
+    "D": 41043,
+    "E": 18448,
+    "F": 6311,
+    "G": 1240
+   },
+   "passoires": {
+    "count": 15533,
+    "classed": 344411,
+    "share": 0.0451
+   },
+   "conso_ep_kwh_m2": {
+    "counted": 344389,
+    "p25": 112.6,
+    "median": 152.5,
+    "p75": 204.9
+   },
+   "surface_m2": {
+    "counted": 334480,
+    "median": 61.9
+   },
+   "periode_construction": [
+    {
+     "label": "1948-1974",
+     "count": 83359
+    },
+    {
+     "label": "avant 1948",
+     "count": 53640
+    },
+    {
+     "label": "1989-2000",
+     "count": 51247
+    },
+    {
+     "label": "2006-2012",
+     "count": 48116
+    },
+    {
+     "label": "2013-2021",
+     "count": 47691
+    },
+    {
+     "label": "2001-2005",
+     "count": 18650
+    },
+    {
+     "label": "1983-1988",
+     "count": 17192
+    },
+    {
+     "label": "1978-1982",
+     "count": 11405
+    },
+    {
+     "label": "1975-1977",
+     "count": 8779
+    },
+    {
+     "label": "après 2021",
+     "count": 4332
+    }
+   ],
+   "type_batiment": [
+    {
+     "label": "appartement",
+     "count": 250788
+    },
+    {
+     "label": "maison",
+     "count": 83898
+    },
+    {
+     "label": "immeuble",
+     "count": 9725
+    }
+   ],
+   "par_annee": [
+    {
+     "year": 2021,
+     "count": 18038
+    },
+    {
+     "year": 2022,
+     "count": 57469
+    },
+    {
+     "year": 2023,
+     "count": 75760
+    },
+    {
+     "year": 2024,
+     "count": 78225
+    },
+    {
+     "year": 2025,
+     "count": 72478
+    },
+    {
+     "year": 2026,
+     "count": 42441
+    }
+   ],
+   "communes": [
+    {
+     "code_insee": "31555",
+     "nom": "Toulouse",
+     "count": 189672
+    },
+    {
+     "code_insee": "31149",
+     "nom": "Colomiers",
+     "count": 9556
+    },
+    {
+     "code_insee": "31069",
+     "nom": "Blagnac",
+     "count": 6380
+    }
+   ]
+  }
+ },
+ "sample": true
+}

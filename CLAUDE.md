@@ -190,6 +190,8 @@ compared against live ADEME records. That test is the definition of "lossless" h
 | `uv run python -m ademe.delta --base-url URL --out DIR` | fetch what changed and merge it in |
 | `uv run python -m ademe.rnb --out DIR [--dept 09]` | RNB buildings → `DIR/v1/rnb/`, re-fetching only what changed |
 | `uv run python scripts/reconcile.py --root DIR/v1` | check every partition against ADEME |
+| `uv run python -m ademe.aggregate --root DIR/v1` | per-département statistics for the public pages |
+| `rclone copyto r2:ademe-dpe/v1/aggregates.json src/seo/aggregates.json` | fetch the real numbers before `npm run build`; without it the build renders the two-département sample. See ADR-0046 |
 
 ## Layout
 
