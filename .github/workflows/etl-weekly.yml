@@ -24,6 +24,10 @@ on:
         description: 'Fetch, merge, reconcile, check and split, but upload nothing'
         type: boolean
         default: false
+      max_repair:
+        description: 'Rows a run repairs on its own before it stops for a human'
+        required: false
+        default: '50000'
 
 # Never cancel a run in flight: it is mid-way through rewriting partitions on
 # R2, and a half-uploaded partition with a swapped manifest is the one state
@@ -62,6 +66,7 @@ jobs:
       ADEME_API_KEY: ${{ secrets.ADEME_API_KEY }}
       SOURCE: ${{ matrix.source }}
       SINCE: ${{ inputs.since }}
+      MAX_REPAIR: ${{ inputs.max_repair }}
     steps:
       # The job holds the published tree, its merge and possibly a reconciled
       # copy: well past the runner's free disk. The toolchains below are
@@ -116,16 +121,27 @@ jobs:
           rm -rf bucket
 
       # After the merge, before the upload: a run that cannot reconcile has
-      # published nothing. Additions arrive through the delta, so anything
-      # still missing here left the dataset. See ADR-0007.
-      - name: Fetch, merge, reconcile, check
+      # published nothing. What left the dataset is deleted, and what this tree
+      # is missing -- by id, or held at a stale version -- is fetched back.
+      # See ADR-0007 and ADR-0043.
+      - name: Fetch, merge, reconcile, repair, check
         if: steps.tree.outputs.published == 'true'
         run: |
           uv run python -m ademe.delta --source "$SOURCE" --base-url "base/$TREE" --out out ${SINCE:+--since "$SINCE"}
-          # Nothing modified this week: no tree was written, and the split reads base.
+          # TRAP: a quiet week still reconciles and still repairs. A hole is not
+          # made by this week's modifications, and one that waited for ADEME to
+          # modify something would wait for as long as the source stays quiet.
+          # The merged tree when the delta wrote one, the joined one when not.
+          root=out; [ -f "out/$TREE/manifest.json" ] || root=base
+          uv run python scripts/reconcile.py --source "$SOURCE" --root "$root/$TREE" \
+            --out reconciled --repair --max-repair "${MAX_REPAIR:-50000}"
+          if [ -d "reconciled/$TREE" ]; then
+            rm -rf "out/$TREE"
+            mkdir -p "$(dirname "out/$TREE")"
+            mv "reconciled/$TREE" "out/$TREE"
+          fi
+          # Still nothing: a quiet week with no hole to fill. The split reads base.
           if [ ! -f "out/$TREE/manifest.json" ]; then exit 0; fi
-          uv run python scripts/reconcile.py --source "$SOURCE" --root "out/$TREE" --out reconciled
-          if [ -d "reconciled/$TREE" ]; then rm -rf "out/$TREE" && mv "reconciled/$TREE" "out/$TREE"; fi
           uv run python scripts/check_delta.py --source "$SOURCE" --out out --base-url "base/$TREE"
 
       # TRAP: split every week, even when the delta wrote nothing -- rows age out

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import date
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -1024,3 +1025,425 @@ def test_a_changed_recent_row_stays_recent_through_the_weekly_pass(whole, tmp_pa
 )
 def test_the_cutoff_counts_back_calendar_months(day, cutoff):
     assert recent.cutoff_for(day) == cutoff
+
+
+# --- holes, on two axes (ADR-0043) ------------------------------------------
+
+
+class Ademe:
+    """ADEME as a repair sees it: whole rows, counted by département or by a
+    window over the modification date, and pulled either by id or by that
+    window.
+
+    Stubbed at the api module, like `FakeApi` above, because what these tests
+    state is what ADEME holds -- not how it says so.
+    """
+
+    MOD = "date_derniere_modification_dpe"
+    KEY = "numero_dpe"
+
+    def __init__(self, rows: list[dict]):
+        self.rows = {r[self.KEY]: r for r in rows}
+        self.counts = 0
+        self.ids_pulled = 0
+        self.rows_pulled = 0
+        self.queries: list[str | None] = []
+        # Ids the server counts but declines to hand over: upstream
+        # contradicting itself, which must never be published.
+        self.withhold: set[str] = set()
+
+    def _pred(self, qs: str | None):
+        if qs is None:
+            return lambda r: True
+        if qs.startswith("NOT _exists_:"):
+            field = qs.split(":", 1)[1]
+            return lambda r: not r.get(field)
+        listed = re.fullmatch(r"(\w+):\((.+)\)", qs)
+        if listed:
+            field = listed.group(1)
+            wanted = {t.strip('"') for t in listed.group(2).split(" OR ")}
+            return lambda r: r.get(field) in wanted
+        field, lo, hi, close = re.fullmatch(r"(\w+):\[(\S+) TO (\S+?)([\]}])", qs).groups()
+
+        def within(r):
+            value = r.get(field) or ""
+            if not value:
+                return False
+            if lo != "*" and value < lo:
+                return False
+            if hi != "*" and (value > hi or (close == "}" and value == hi)):
+                return False
+            return True
+
+        return within
+
+    def _match(self, departement, qs):
+        keep = self._pred(qs)
+        rows = [r for r in self.rows.values() if keep(r)]
+        if departement is not None:
+            rows = [r for r in rows if r["code_departement_ban"] == departement]
+        return rows
+
+    def high_water(self, _client, *, source=None):
+        return max((r[self.MOD] for r in self.rows.values() if r.get(self.MOD)), default=None)
+
+    def total(self, _client, *, departement=None, qs=None, source=None):
+        self.counts += 1
+        return len(self._match(departement, qs))
+
+    def iter_pages(self, _client, *, departement=None, qs=None, select=None, **_kw):
+        self.queries.append(qs)
+        rows = self._match(departement, qs)
+        if select:
+            self.ids_pulled += len(rows)
+            rows = [{c: r[c] for c in select} for r in rows]
+        else:
+            rows = [r for r in rows if r[self.KEY] not in self.withhold]
+            self.rows_pulled += len(rows)
+        if not rows:
+            return
+
+        class Page:
+            def __init__(self, rows):
+                self.rows, self.next_url, self.nbytes = rows, None, 0
+
+        yield Page(rows)
+
+
+@pytest.fixture
+def ademe(monkeypatch):
+    def install(rows: list[dict]) -> Ademe:
+        up = Ademe(rows)
+        for name in ("total", "iter_pages", "high_water"):
+            monkeypatch.setattr(delta.api, name, getattr(up, name))
+        monkeypatch.setattr(delta.api, "client", lambda: None)
+        return up
+
+    return install
+
+
+# What the `base` fixture published, as ADEME would hand it back.
+PUBLISHED = [
+    _row("2409E0000001", "09", "2026-08-01"),
+    _row("2409E0000002", "09", "2026-08-02", etiquette_dpe="E"),
+    _row("2431E0000001", "31", "2026-08-01"),
+]
+
+
+def _published_rows(tree, dept="09") -> dict[str, str]:
+    d = duckdb.connect()
+    return dict(
+        d.execute(
+            "SELECT numero_dpe, etiquette_dpe FROM"
+            f" read_parquet('{tree / 'dpe' / f'dept={dept}' / 'part-0000.parquet'}')"
+        ).fetchall()
+    )
+
+
+def _script():
+    """scripts/reconcile.py, loaded as the job runs it."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "reconcile_script", Path(__file__).resolve().parent.parent / "scripts" / "reconcile.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_an_id_missing_here_is_fetched_whole_and_published(base, tmp_path, ademe):
+    """Reconciliation has always found these ids and could do nothing with
+    them: it holds an id, and publishing a row means normalising a record
+    (ADR-0007). The warning it printed was a person's job to act on, every week.
+    """
+    published, _ = base
+    up = ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02", etiquette_dpe="A")])
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, published, out)
+
+    assert healed.fetched == ["2409E0000009"]
+    assert _published_rows(out) == {
+        "2409E0000001": "D",
+        "2409E0000002": "E",
+        "2409E0000009": "A",
+    }
+    assert up.rows_pulled == 1, "a repair fetches the rows it is missing, and no more"
+
+
+def test_a_row_older_than_anything_published_is_found_by_the_key_axis(base, tmp_path, ademe):
+    """What each axis is for. The date axis walks from the oldest month this
+    tree holds, so a certificate ADEME back-dates before that is outside every
+    window it counts. The count per département sees it in one request."""
+    published, _ = base
+    up = ademe(PUBLISHED + [_row("2409E0000009", "09", "2020-01-05")])
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, published, out)
+
+    assert healed.fetched == ["2409E0000009"]
+    assert "2409E0000009" in _published_rows(out)
+    assert up.ids_pulled <= 4, "the key axis narrows by count before it pulls ids"
+
+
+def test_a_stale_version_is_found_by_its_date_and_replaced(base, tmp_path, ademe):
+    """The row is here, under the right département, and its content is old.
+    Every count per partition agrees -- that axis cannot see a version at all.
+    By modification date it shows twice: one row too many in the month we hold
+    it under, one too few in the month ADEME holds it under.
+    """
+    published, _ = base
+    ademe(
+        [
+            _row("2409E0000001", "09", "2026-08-01"),
+            _row("2409E0000002", "09", "2026-09-10", etiquette_dpe="A"),  # re-issued
+            _row("2431E0000001", "31", "2026-08-01"),
+        ]
+    )
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, published, out)
+
+    assert healed.fetched == ["2409E0000002"]
+    assert _published_rows(out)["2409E0000002"] == "A", "the stale version is still published"
+    got = export_parquet.read_rows(out, ["2409E0000002"])
+    assert got["2409E0000002"]["date_derniere_modification_dpe"] == "2026-09-10"
+
+
+def test_a_swap_that_hides_from_the_key_ranges_is_found_by_date(base, tmp_path, ademe):
+    """ADR-0007's blind spot: a deletion and an addition in the same partition
+    net out, and the count still matches. Once the addition is found on the date
+    axis, the deletion no longer has anything to cancel against."""
+    published, _ = base
+    up = ademe(
+        [
+            _row("2409E0000001", "09", "2026-08-01"),
+            _row("2409E0000099", "09", "2026-09-05"),  # arrived
+            _row("2431E0000001", "31", "2026-08-01"),  # 2409E0000002 left
+        ]
+    )
+
+    report = delta.reconcile(None, published)
+    assert report["09"].clean(), "the swap is supposed to be invisible to the key axis"
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, published, out)
+
+    assert healed.fetched == ["2409E0000099"]
+    assert healed.gone == {"09": ["2409E0000002"]}
+    assert set(_published_rows(out)) == {"2409E0000001", "2409E0000099"}
+    assert up.ids_pulled < 20
+
+
+def test_deletions_are_not_mistaken_for_holes(base, tmp_path, ademe, monkeypatch):
+    """What the first national dry run hit (2026-09-19, run 35474909563).
+
+    A row that left the dataset is still in this tree until the rewrite, and
+    counted by date it looks exactly like a day ADEME is short of. On existing
+    housing, which had missed two weekly runs, that was 209 days across 10
+    months -- past `MAX_HOLE_DAYS`, so the job published nothing and the
+    deletions it had just found went unapplied. The date axis is given the
+    deletions, and only follows a window ADEME holds MORE rows in.
+    """
+    published, _ = base
+    up = ademe(
+        [
+            _row("2409E0000001", "09", "2026-08-01"),
+            _row("2431E0000001", "31", "2026-08-01"),  # 2409E0000002 left the dataset
+        ]
+    )
+    monkeypatch.setattr(delta, "MAX_HOLE_DAYS", 0)
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, published, out)
+
+    assert healed.gone == {"09": ["2409E0000002"]}
+    assert healed.fetched == []
+    assert set(_published_rows(out)) == {"2409E0000001"}
+    assert up.ids_pulled <= 2, "the date axis chased a day it could never fill"
+
+
+def test_a_deletion_does_not_hide_a_hole_in_the_same_month(base, tmp_path, ademe):
+    """The other half of the same fix. A row that left the dataset is one too
+    many for us in its month; a row re-issued into that month is one too few.
+    Counted together they cancel, and the month looks right while a stale
+    version sits in the tree. Taking the deletions out of our own count first is
+    what stops one axis hiding the other's work."""
+    published, _ = base
+    ademe(
+        [
+            _row("2409E0000001", "09", "2026-08-01"),
+            _row("2409E0000002", "09", "2026-09-20", etiquette_dpe="A"),  # re-issued
+            # 2431E0000001 left the dataset, and this tree holds it under 09-05
+        ]
+    )
+    # The published tree's 31 partition is dated into the same month.
+    tree = tmp_path / "shifted"
+    rows = [
+        _row("2409E0000001", "09", "2026-08-01"),
+        _row("2409E0000002", "09", "2026-08-02", etiquette_dpe="E"),
+        _row("2431E0000001", "31", "2026-09-05"),
+    ]
+    path, conn = _build(tmp_path, "shifted", rows)
+    export_parquet.export(path, tree)
+    conn.close()
+
+    out = tmp_path / "healed"
+    healed = delta.heal(None, tree / export_parquet.VERSION, out)
+
+    assert healed.gone == {"31": ["2431E0000001"]}
+    assert healed.fetched == ["2409E0000002"], "the re-issued row hid behind the deletion"
+    assert _published_rows(out)["2409E0000002"] == "A"
+
+
+def test_a_repair_never_moves_the_mark(base, tmp_path, ademe):
+    """TRAP: the repair's own rows are fetched by id, of any age, and the newest
+    of them says nothing about what ADEME held when anything was fetched.
+    Adopting it as the high water would skip everything modified in between --
+    which is the hole ADR-0041 closed, dug again by the thing that fills it."""
+    published, manifest = base
+    assert manifest["high_water"] == "2026-08-02"
+    ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-09-30")])
+
+    out = tmp_path / "healed"
+    delta.heal(None, published, out)
+
+    assert json.loads((out / "manifest.json").read_text())["high_water"] == "2026-08-02"
+
+
+def test_a_repair_over_the_cap_publishes_nothing_and_names_the_command(base, tmp_path, ademe):
+    """The ETL is polite, and a repair is ADEME's time too (CLAUDE.md §11). Past
+    the cap this is not a hole to heal quietly."""
+    published, _ = base
+    ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02")])
+
+    out = tmp_path / "healed"
+    with pytest.raises(delta.ReconcileError) as e:
+        delta.heal(None, published, out, max_repair=0)
+
+    assert "--max-repair" in str(e.value)
+    assert not out.exists(), "a run over the cap must publish nothing"
+
+
+def test_a_repair_refuses_when_upstream_will_not_hand_over_what_it_counted(base, tmp_path, ademe):
+    """Same rule as the id pull: upstream has to agree with itself before this
+    job rewrites a published file on the strength of what it said."""
+    published, _ = base
+    up = ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02")])
+    up.withhold = {"2409E0000009"}
+
+    with pytest.raises(delta.ReconcileError) as e:
+        delta.heal(None, published, tmp_path / "healed")
+    assert "contradicts itself" in str(e.value)
+
+
+def test_agreeing_months_pull_no_ids(base, tmp_path, ademe):
+    """The politeness property. A month costs one count; nothing else is spent
+    unless a count disagrees."""
+    published, _ = base
+    up = ademe(PUBLISHED)
+
+    healed = delta.heal(None, published, tmp_path / "healed")
+
+    assert healed.clean()
+    assert up.ids_pulled == 0 and up.rows_pulled == 0
+    assert up.counts <= 8, f"{up.counts} count requests for two partitions and one month"
+
+
+def test_a_republication_is_not_repaired_quietly(base, tmp_path, ademe, monkeypatch):
+    """Whole months moving at once is an event upstream, not a hole here."""
+    published, _ = base
+    ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02")])
+    monkeypatch.setattr(delta, "MAX_HOLE_DAYS", 0)
+
+    with pytest.raises(delta.ReconcileError) as e:
+        delta.heal(None, published, tmp_path / "healed")
+    assert "republication" in str(e.value)
+
+
+def test_the_weekly_job_repairs_through_the_script(base, tmp_path, ademe, monkeypatch):
+    """Through the transport CI uses: `reconcile.py --repair --out`."""
+    script = _script()
+    published, _ = base
+    ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02", etiquette_dpe="A")])
+    monkeypatch.setattr(script.api, "client", lambda: None)
+
+    out = tmp_path / "reconciled"
+    assert script.main(["--root", str(published), "--out", str(out), "--repair"]) == 0
+    assert "2409E0000009" in _published_rows(out / export_parquet.VERSION)
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("slug", ["existant", "neuf", "tertiaire", "audit"])
+def test_an_id_list_query_returns_exactly_those_ids(slug):
+    """What a repair asks with. A term must be QUOTED -- the opposite of a range
+    bound, which Data Fair rejects quoted (ADR-0040) -- and `ID_CHUNK` of them
+    have to fit in a URL this server will answer."""
+    from ademe import api
+    from ademe.config import SOURCES
+
+    source = SOURCES[slug]
+    key = source.mapping.key
+    client = api.client()
+
+    page = next(api.iter_pages(client, select=[key], page_size=delta.ID_CHUNK, source=source))
+    ids = [r[key] for r in page.rows][: delta.ID_CHUNK]
+    assert len(ids) == delta.ID_CHUNK
+
+    queries = list(delta.id_queries(key, ids))
+    assert len(queries) == 1
+    got = set()
+    for p in api.iter_pages(client, qs=queries[0], select=[key], source=source):
+        got.update(r[key] for r in p.rows)
+
+    assert got == set(ids), "the server did not return exactly the ids it was asked for"
+
+
+@pytest.mark.live
+@pytest.mark.parametrize("slug", ["existant", "audit"])
+def test_month_windows_tile_the_source(slug):
+    """The date axis cuts the modification date into months and days. If the
+    windows overlapped or left a gap, the counts it compares would be wrong in
+    a way nothing else would notice."""
+    from ademe import api
+    from ademe.config import SOURCES
+
+    source = SOURCES[slug]
+    mod = source.mapping.modified
+    client = api.client()
+
+    newest = api.high_water(client, source=source)
+    months, month = [], f"{newest[:7]}"
+    for _ in range(12):
+        months.append(month)
+        year, mon = (int(p) for p in month.split("-"))
+        month = f"{year - (mon == 1)}-{(mon - 2) % 12 + 1:02d}"
+    months.reverse()
+
+    whole = api.total(
+        client,
+        qs=delta._window_qs(mod, delta._month(months[0])[0], delta._month(months[-1])[1]),
+        source=source,
+    )
+    parts = sum(
+        api.total(client, qs=delta._window_qs(mod, *delta._month(m)), source=source)
+        for m in months
+    )
+
+    assert whole > 0
+    assert parts == whole, "twelve monthly counts do not add up to the twelve-month window"
+
+
+def test_over_the_cap_the_script_fails_rather_than_publishing(base, tmp_path, ademe, monkeypatch):
+    script = _script()
+    published, _ = base
+    ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02")])
+    monkeypatch.setattr(script.api, "client", lambda: None)
+
+    out = tmp_path / "reconciled"
+    assert (
+        script.main(["--root", str(published), "--out", str(out), "--repair", "--max-repair", "0"])
+        == 1
+    )
+    assert not out.exists()

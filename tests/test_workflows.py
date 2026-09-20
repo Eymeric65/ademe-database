@@ -106,6 +106,18 @@ def test_each_source_is_reconciled_and_checked_before_it_is_uploaded():
     assert where == sorted(where), f"out of order: {steps}"
 
 
+def test_a_hole_is_repaired_every_week_even_when_the_delta_fetched_nothing():
+    """A hole is not made by this week's modifications, so a repair gated on
+    them would wait for as long as the source stays quiet. Reconcile reads the
+    merged tree when the delta wrote one and the joined one when not, and it
+    repairs rather than printing a warning for somebody. See ADR-0043."""
+    step = next(s for s in _steps() if "scripts/reconcile.py" in s)
+    assert "--repair" in step and "--max-repair" in step
+    assert 'root=out; [ -f "out/$TREE/manifest.json" ] || root=base' in step
+    head = step[: step.index("scripts/reconcile.py")]
+    assert "exit 0" not in head, "a quiet week exits before the repair"
+
+
 def test_the_weekly_job_reads_the_published_trees_from_r2_not_the_public_domain():
     """`data.recherche-maison.com` served the bucket to anyone, past the login
     gate (ADR-0012). The weekly job read the published trees through it, so the
