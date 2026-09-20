@@ -427,41 +427,75 @@ export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
 
-    let matched: { route: Route; params: Record<string, string> } | null = null
-    for (const route of ROUTES) {
-      const params = match(route.path, url.pathname)
-      if (params && (route.method === request.method || route.method === 'ANY')) {
-        matched = { route, params }
-        break
-      }
+    // One indexable host. www and the apex are both custom domains on this
+    // Worker, so without this they answer the same pages under two names.
+    //
+    // TRAP: the exact hostname, never "anything that is not the apex". Every
+    // test in test/db/ drives this Worker at the literal host `http://x`, and
+    // the wider condition 301s the entire suite.
+    //
+    // TRAP: GET and HEAD only. A 301 drops the request body, and /api/auth/*
+    // takes POSTs -- a sign-in sent to www would fail with nothing to read.
+    if (
+      url.hostname === 'www.recherche-maison.com' &&
+      (request.method === 'GET' || request.method === 'HEAD')
+    ) {
+      const apex = new URL(url)
+      apex.hostname = 'recherche-maison.com'
+      return Response.redirect(apex.toString(), 301)
     }
 
-    // The React build, served from the ASSETS binding without touching a
-    // database. Only what the router does not own.
-    if (!matched && !ROUTED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
-      return env.ASSETS.fetch(request)
-    }
+    const response = await dispatch(request, env, url)
+    if (!url.hostname.endsWith('.workers.dev')) return response
 
-    // Before dispatch, not inside a handler: the Worker has no deploy-time
-    // hook that can reach D1, so the first request an isolate serves is what
-    // brings the schema up to date. Doing it in one handler only would leave
-    // every OTHER route to fail with "no such table" on a fresh database.
-    await ensureMigrated(env)
-
-    const caller = await callerFor(request, env)
-
-    // Default-deny, before dispatch. An unmatched path is treated as if it were
-    // a protected route, so a missing route and an unprotected one look the same
-    // from outside: both need a caller.
-    if (matched?.route.scope !== 'public' && caller.sub === '') {
-      return json({ error: 'unauthorized' }, 401)
-    }
-    if (!matched) return json({ error: 'not found' }, 404)
-    // see ADR-0038
-    if (matched.route.scope === 'paid' && (await planOf(env, caller)) !== 'paid') {
-      return json({ error: 'forbidden' }, 403)
-    }
-
-    return matched.route.handle({ request, env, caller, params: matched.params })
+    // Every `wrangler versions upload` publishes this same app on a crawlable
+    // *.workers.dev host, and none of them should be in an index.
+    //
+    // TRAP: an ASSETS response has immutable headers -- set() on it throws, so
+    // the header goes on a copy. `response.body` is null exactly on the
+    // statuses that forbid a body (204, 304), which the constructor accepts.
+    const out = new Response(response.body, response)
+    out.headers.set('X-Robots-Tag', 'noindex')
+    return out
   },
 } satisfies ExportedHandler<Env>
+
+/** Route, gate and answer one request. `url` is the caller's, already parsed. */
+async function dispatch(request: Request, env: Env, url: URL): Promise<Response> {
+  let matched: { route: Route; params: Record<string, string> } | null = null
+  for (const route of ROUTES) {
+    const params = match(route.path, url.pathname)
+    if (params && (route.method === request.method || route.method === 'ANY')) {
+      matched = { route, params }
+      break
+    }
+  }
+
+  // The React build, served from the ASSETS binding without touching a
+  // database. Only what the router does not own.
+  if (!matched && !ROUTED_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+    return env.ASSETS.fetch(request)
+  }
+
+  // Before dispatch, not inside a handler: the Worker has no deploy-time
+  // hook that can reach D1, so the first request an isolate serves is what
+  // brings the schema up to date. Doing it in one handler only would leave
+  // every OTHER route to fail with "no such table" on a fresh database.
+  await ensureMigrated(env)
+
+  const caller = await callerFor(request, env)
+
+  // Default-deny, before dispatch. An unmatched path is treated as if it were
+  // a protected route, so a missing route and an unprotected one look the same
+  // from outside: both need a caller.
+  if (matched?.route.scope !== 'public' && caller.sub === '') {
+    return json({ error: 'unauthorized' }, 401)
+  }
+  if (!matched) return json({ error: 'not found' }, 404)
+  // see ADR-0038
+  if (matched.route.scope === 'paid' && (await planOf(env, caller)) !== 'paid') {
+    return json({ error: 'forbidden' }, 403)
+  }
+
+  return matched.route.handle({ request, env, caller, params: matched.params })
+}
