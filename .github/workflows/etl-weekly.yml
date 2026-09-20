@@ -28,6 +28,10 @@ on:
         description: 'Rows a run repairs on its own before it stops for a human'
         required: false
         default: '50000'
+      max_hole_days:
+        description: 'Days holding more rows upstream before a run calls it a republication'
+        required: false
+        default: '60'
 
 # Never cancel a run in flight: it is mid-way through rewriting partitions on
 # R2, and a half-uploaded partition with a swapped manifest is the one state
@@ -49,7 +53,10 @@ jobs:
       matrix:
         source: ${{ fromJSON((!inputs.source || inputs.source == 'all') && '["existant","neuf","tertiaire","audit"]' || format('["{0}"]', inputs.source)) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    # Four hours, not two: run 34829784527 was cancelled at exactly 120 minutes
+    # reconciling audits, and a source's own runner means a raised ceiling costs
+    # the other three nothing. See ADR-0045.
+    timeout-minutes: 240
     # The published trees are read from R2 with the job's own key, never over a
     # public URL: the bucket's public domain is what let the login gate be
     # walked around (ADR-0012), and this is what lets it go. See ADR-0033.
@@ -67,6 +74,7 @@ jobs:
       SOURCE: ${{ matrix.source }}
       SINCE: ${{ inputs.since }}
       MAX_REPAIR: ${{ inputs.max_repair }}
+      MAX_HOLE_DAYS: ${{ inputs.max_hole_days }}
     steps:
       # The job holds the published tree, its merge and possibly a reconciled
       # copy: well past the runner's free disk. The toolchains below are
@@ -134,7 +142,8 @@ jobs:
           # The merged tree when the delta wrote one, the joined one when not.
           root=out; [ -f "out/$TREE/manifest.json" ] || root=base
           uv run python scripts/reconcile.py --source "$SOURCE" --root "$root/$TREE" \
-            --out reconciled --repair --max-repair "${MAX_REPAIR:-50000}"
+            --out reconciled --repair --max-repair "${MAX_REPAIR:-50000}" \
+            --max-hole-days "${MAX_HOLE_DAYS:-60}"
           if [ -d "reconciled/$TREE" ]; then
             rm -rf "out/$TREE"
             mkdir -p "$(dirname "out/$TREE")"

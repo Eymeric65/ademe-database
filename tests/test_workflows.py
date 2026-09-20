@@ -261,3 +261,16 @@ def test_dev_deploys_the_preview_and_only_main_deploys_production():
         ("deploy", "github.ref == 'refs/heads/dev'"): "--env preview",
         ("deploy", "github.ref == 'refs/heads/main'"): "",
     }
+
+
+def test_a_recovery_run_can_be_told_how_many_hole_days_to_chase():
+    """`MAX_HOLE_DAYS` stops a scheduled run that found a republication rather
+    than a hole. A tree that has never been repaired trips it too, and until
+    the cap was a dispatch input the only way past it was to edit the constant
+    and push. It is a dial beside `max_repair` now. See ADR-0045."""
+    text = _text()
+    assert re.search(
+        r"^      max_hole_days:\n(?:        .*\n)*?        default: '\d+'$", text, re.M
+    ), "no max_hole_days input"
+    step = next(s for s in _steps() if "scripts/reconcile.py" in s)
+    assert "--max-hole-days" in step, "the input never reaches the repair"
