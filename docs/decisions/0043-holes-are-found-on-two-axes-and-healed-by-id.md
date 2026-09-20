@@ -78,6 +78,29 @@ Measured live, 2026-09-20, over each source's whole history:
 So a clean week's second axis is about seven seconds, and the sums show the windows tile the source
 with no gap and no overlap.
 
+**What it found on the published tree** (run 35477366054, existing housing, `dry_run`, 2026-09-20):
+
+```
+36 month(s) counted, 2 hold more upstream
+  2026-09-01: 10 691 upstream,  8 670 here        2026-09-04: 12 317 upstream, 7 894 here
+  2026-09-02: 11 656 upstream,  9 533 here        2026-09-05:  2 017 upstream, 1 692 here
+  2026-09-03: 11 124 upstream,  9 004 here        2026-09-06:  1 964 upstream, 1 631 here
+  dept=03: settled at -1 +0
+repaired 11 733 row(s), deleted 2 917, rewrote 96 partition(s)
+rows 15,550,120 -> 15,604,436
+```
+
+That is ADR-0041's hole, to the row: its ~11.7k certificates, in its 09-01..09-06 window. **The key
+axis reported none of them** (`+0` in every département) because they are not missing — they are
+here, under their old modification dates, at the version that was published before the batch
+re-issued them. A stale version is what the date axis is for. The tree came out at 15,604,436 rows,
+which is ADEME's own total for the dataset, and `dept=03` is a swap the counts had cancelled.
+
+The whole source took 52 minutes: 9 for the delta, 30 for the key axis over 105 partitions with
+deletions nearly everywhere, seconds for the month counts, 4 for the repair and the rewrite, 4 for
+the split. Well inside the per-source budget ADR-0042 gives it, and the reason that budget is per
+source.
+
 **The repair.** The union of both axes goes back through `delta.fetch_ids`: `key:("a" OR "b" …)`,
 in chunks of `ID_CHUNK` (100), loaded by the SAME `ingest.Loader` and exported by the SAME exporter
 as everything else, then merged. A term must be **quoted** here — the opposite of a range bound,
