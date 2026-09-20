@@ -771,6 +771,7 @@ def date_holes(
     source: Source = EXISTANT,
     quiet: bool = True,
     gone: "set[str] | None" = None,
+    max_hole_days: int | None = None,
 ) -> set[str]:
     """The ids ADEME holds under a modification date that this tree does not.
 
@@ -796,6 +797,9 @@ def date_holes(
     the two axes do not report each other's work.
     """
     manifest = read_manifest(root)
+    # Resolved here rather than as the default: a default binds at definition
+    # time, and the cap is a module constant the tests reach in to change.
+    cap = MAX_HOLE_DAYS if max_hole_days is None else max_hole_days
     modified, key = source.mapping.modified, source.mapping.key
     duck = _duck()
     try:
@@ -841,11 +845,12 @@ def date_holes(
                 ) > by_day.get(day.isoformat(), 0):
                     days.append((day.isoformat(), nxt.isoformat()))
                 day = nxt
-        if len(days) > MAX_HOLE_DAYS:
+        if len(days) > cap:
             raise ReconcileError(
                 f"ADEME holds more rows than this tree on {len(days)} days, over"
                 f" {len(suspect)} month(s); that is a republication rather than a hole."
-                " Publishing nothing: look at the run before re-running."
+                " Publishing nothing: look at the run before re-running, then raise"
+                " --max-hole-days if it really is a tree this far behind."
             )
 
         scan = ", ".join(f"'{f}'" for f in files)
@@ -934,6 +939,7 @@ def heal(
     *,
     source: Source = EXISTANT,
     max_repair: int = MAX_REPAIR,
+    max_hole_days: int | None = None,
     quiet: bool = True,
     work: Path | None = None,
     on: date | None = None,
@@ -959,6 +965,7 @@ def heal(
         source=source,
         quiet=quiet,
         gone={n for left in gone.values() for n in left},
+        max_hole_days=max_hole_days,
     )
 
     work = Path(work) if work else Path(tempfile.mkdtemp())

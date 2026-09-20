@@ -35,6 +35,7 @@ def _heal(args, source) -> int:
             args.out / export_parquet.VERSION / source.subdir,
             source=source,
             max_repair=args.max_repair,
+            max_hole_days=args.max_hole_days,
             quiet=False,
         )
     except delta.ReconcileError as exc:
@@ -73,6 +74,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=delta.MAX_REPAIR,
         help="rows this run repairs on its own before it stops for a human",
+    )
+    ap.add_argument(
+        "--max-hole-days",
+        type=int,
+        default=delta.MAX_HOLE_DAYS,
+        help="days holding more rows upstream before this run calls it a republication",
     )
     args = ap.parse_args(argv)
     source = SOURCES[args.source]

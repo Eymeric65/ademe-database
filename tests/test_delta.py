@@ -1520,6 +1520,43 @@ def test_a_republication_is_not_repaired_quietly(base, tmp_path, ademe, monkeypa
     assert "republication" in str(e.value)
 
 
+def test_a_recovery_run_may_raise_the_hole_day_cap(base, tmp_path, ademe, monkeypatch):
+    """The cap stops a SCHEDULED run that found a republication rather than a
+    hole. A tree that has never been repaired is the same shape and trips it
+    too, and there was no way past it but to edit the constant and push.
+
+    The dial has to beat the constant, not merely exist: a run told to chase
+    400 days chases them even where the default would have stopped it. Spending
+    is still bounded, by `max_repair`, which caps the rows actually fetched.
+    See ADR-0045.
+    """
+    published, _ = base
+    ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02")])
+    monkeypatch.setattr(delta, "MAX_HOLE_DAYS", 0)
+
+    with pytest.raises(delta.ReconcileError):
+        delta.heal(None, published, tmp_path / "stopped")
+
+    healed = delta.heal(None, published, tmp_path / "healed", max_hole_days=400)
+    assert healed.fetched == ["2409E0000009"]
+    assert "2409E0000009" in _live(tmp_path / "healed")
+
+
+def test_the_hole_day_cap_reaches_the_repair_through_the_script(base, tmp_path, ademe, monkeypatch):
+    """Through the transport CI uses. A dial the weekly job cannot pass down is
+    no dial at all."""
+    script = _script()
+    published, _ = base
+    ademe(PUBLISHED + [_row("2409E0000009", "09", "2026-08-02")])
+    monkeypatch.setattr(script.api, "client", lambda: None)
+    monkeypatch.setattr(delta, "MAX_HOLE_DAYS", 0)
+    argv = ["--root", str(published), "--out", str(tmp_path / "out"), "--repair"]
+
+    assert script.main(argv) == 1, "the default cap is supposed to stop this run"
+    assert script.main([*argv, "--max-hole-days", "400"]) == 0
+    assert "2409E0000009" in _published_rows(tmp_path / "out" / export_parquet.VERSION)
+
+
 def test_the_weekly_job_repairs_through_the_script(base, tmp_path, ademe, monkeypatch):
     """Through the transport CI uses: `reconcile.py --repair --out`."""
     script = _script()
