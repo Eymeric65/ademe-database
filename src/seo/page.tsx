@@ -109,8 +109,8 @@ export function communeLabel(codeInsee: string, nom: string): string {
 // --- the page ---------------------------------------------------------------
 
 const CSS = `
-/* The tokens are src/index.css's, copied rather than imported: this page has
-   to be complete in one file, with no stylesheet request. */
+/* The tokens are src/index.css's, copied rather than imported: the page's own
+   rules are inlined, and the linked app stylesheet only styles the masthead. */
 @font-face {
   font-family: 'Fraunces';
   font-style: normal;
