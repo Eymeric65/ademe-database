@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { NAMES, deptSlug } from '../../src/data/sources'
-import { renderDepartementPage } from '../../src/seo/page'
+import { renderDepartementPage, renderDepartementsIndex } from '../../src/seo/page'
 
 /**
  * The prerendered département pages are the ONLY indexable URLs this domain
@@ -44,7 +44,14 @@ const OTHERS = [
   { dept: '2A', name: 'Corse-du-Sud', slug: 'corse-du-sud' },
 ]
 
-const html = renderDepartementPage({ agg: FIXTURE, stamp: STAMP, others: OTHERS })
+const CSS_HREF = '/assets/index-fixture0.css'
+
+const html = renderDepartementPage({
+  agg: FIXTURE,
+  stamp: STAMP,
+  others: OTHERS,
+  stylesheet: CSS_HREF,
+})
 
 describe('the département page', () => {
   it('names the département and its certificate count in the h1', () => {
@@ -121,11 +128,83 @@ describe('the département page', () => {
       },
       stamp: STAMP,
       others: OTHERS,
+      stylesheet: CSS_HREF,
     })
     expect(paris).toContain('Paris 15e')
     expect(paris).toContain('Paris 1er')
     expect(paris).toContain('Lyon 1er')
     expect(paris).toContain('Marseille 16e')
+  })
+})
+
+/**
+ * A page reached from a search result has no way back into the site but the
+ * header, so the département pages wear the app's own masthead -- the same
+ * markup and the same stylesheet -- rather than a bare wordmark.
+ */
+describe('the masthead of a département page', () => {
+  it('is the app’s masthead, with Statistiques as the current tab', () => {
+    expect(html).toContain('<header class="masthead">')
+    expect(html).toContain('<a href="/departements" aria-current="page">Statistiques</a>')
+    expect(html).toContain('<a href="/presentation">Présentation</a>')
+    expect(html).toContain('<a href="/">Rechercher</a>')
+    expect(html).toContain(`<link rel="stylesheet" href="${CSS_HREF}"/>`)
+  })
+
+  it('files the page under the index in its breadcrumb', () => {
+    const crumbs = [...html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)]
+      .map((m) => JSON.parse(m[1] as string))
+      .find((b) => b['@type'] === 'BreadcrumbList')
+    expect(crumbs.itemListElement.map((i: { item: string }) => i.item)).toEqual([
+      'https://recherche-maison.com/',
+      'https://recherche-maison.com/departements',
+      'https://recherche-maison.com/departement/ariege',
+    ])
+  })
+})
+
+const index = renderDepartementsIndex({
+  rows: [
+    FIXTURE,
+    {
+      ...FIXTURE,
+      dept: '31',
+      certificates: 1000,
+      passoires: { count: 100, classed: 1000, share: 0.1 },
+      conso_ep_kwh_m2: null,
+    },
+  ],
+  stamp: STAMP,
+  stylesheet: CSS_HREF,
+})
+
+describe('the index of départements', () => {
+  it('is « Statistiques par département », at /departements, under its own tab', () => {
+    expect(index).toMatch(/<h1[^>]*>Statistiques par département<\/h1>/)
+    expect(index).toContain('<link rel="canonical" href="https://recherche-maison.com/departements"/>')
+    expect(index).toContain('<a href="/departements" aria-current="page">Statistiques</a>')
+    expect(index).toContain(`<link rel="stylesheet" href="${CSS_HREF}"/>`)
+  })
+
+  it('gives each département a row linking its page, with its key figures', () => {
+    const row = /<tr><th scope="row"><a href="\/departement\/ariege">(.*?)<\/tr>/s.exec(index)?.[0]
+    expect(row).toContain('09 Ariège')
+    expect(row).toContain('31\u00a0157')
+    expect(row).toContain('16,0\u00a0%')
+    expect(row).toContain('203,7')
+    expect(index).toContain('href="/departement/haute-garonne"')
+  })
+
+  it('totals the country from the counts, not by averaging the shares', () => {
+    // (4971 + 100) / (31157 + 1000) = 15,77 %; the mean of the shares is 13,0 %.
+    const total = /<tfoot>(.*?)<\/tfoot>/s.exec(index)?.[1] ?? ''
+    expect(total).toContain('32\u00a0157')
+    expect(total).toContain('15,8\u00a0%')
+  })
+
+  it('ships zero JavaScript: the only script is the JSON-LD', () => {
+    const scripts = [...index.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1] ?? '')
+    for (const attrs of scripts) expect(attrs).toBe(' type="application/ld+json"')
   })
 })
 

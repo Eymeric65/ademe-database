@@ -101,6 +101,36 @@ test('the présentation renders at its own URL, with links rather than dead butt
   )
 })
 
+/**
+ * A département page reached from a search result used to have one way out: a
+ * bare wordmark. The index at /departements links every page, and the app's
+ * own masthead -- same classes, same stylesheet -- leads to it from all of them.
+ */
+test('the index of départements links every page, under the app’s masthead', async ({ page }) => {
+  const res = await page.goto('/departements')
+  expect(res?.status()).toBe(200)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Statistiques par département')
+
+  const pages = await page.locator('a[href^="/departement/"]').evaluateAll((els) =>
+    els.map((el) => el.getAttribute('href')),
+  )
+  expect(pages).toEqual(['/departement/ariege', '/departement/haute-garonne'])
+
+  const menu = page.getByRole('navigation', { name: 'Principal' })
+  await expect(menu.getByRole('link', { name: 'Statistiques' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+  // Styled by the app's stylesheet, not merely present: the masthead sticks.
+  await expect(page.locator('header.masthead')).toHaveCSS('position', 'sticky')
+
+  await page.getByRole('link', { name: '09 Ariège' }).click()
+  await expect(page).toHaveURL(/\/departement\/ariege$/)
+  await expect(page.locator('header.masthead')).toHaveCSS('position', 'sticky')
+  await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Statistiques' }).click()
+  await expect(page).toHaveURL(/\/departements$/)
+})
+
 test('the sitemap carries the présentation', async ({ page }) => {
   const res = await page.request.get('/sitemap.xml')
   expect(res.status()).toBe(200)
