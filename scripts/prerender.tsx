@@ -40,17 +40,23 @@ const samplePath = fileURLToPath(new URL('../src/seo/aggregates.sample.json', im
 const distDir = fileURLToPath(new URL('../dist/', import.meta.url))
 
 /**
- * The real aggregate when it is on disk, the committed sample otherwise. Pure
- * and parameterised so a test can drive both branches without depending on
- * whether whoever runs it happens to have fetched the aggregate.
+ * The real aggregate when it is on disk, the committed sample otherwise -- or,
+ * when `required`, an error. Pure and parameterised so a test can drive every
+ * branch without depending on whether whoever runs it happens to have fetched
+ * the aggregate.
  */
-export function pickAggregates(real: string, sample: string): string {
-  return existsSync(real) ? real : sample
+export function pickAggregates(real: string, sample: string, required = false): string {
+  if (existsSync(real)) return real
+  if (required) throw new Error(`AGGREGATES_REQUIRED is set but ${real} is missing`)
+  return sample
 }
 
-/** The aggregate this machine renders from. */
+/**
+ * The aggregate this machine renders from. The deploy job sets
+ * AGGREGATES_REQUIRED=1, because `rclone copyto` of a missing object exits 0.
+ */
 export function aggregatesPath(): string {
-  return pickAggregates(realPath, samplePath)
+  return pickAggregates(realPath, samplePath, process.env.AGGREGATES_REQUIRED === '1')
 }
 
 /**

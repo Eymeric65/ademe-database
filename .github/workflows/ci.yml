@@ -113,7 +113,12 @@ jobs:
         run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
       - name: Fetch the departement aggregate
         run: rclone copyto r2:ademe-dpe/v1/aggregates.json src/seo/aggregates.json
+      # TRAP: `rclone copyto` of a missing object exits 0 having copied
+      # nothing, so the fetch alone guards nothing. This makes the build refuse
+      # to fall back to the sample instead.
       - run: npm run build
+        env:
+          AGGREGATES_REQUIRED: '1'
       # TRAP: without `--env preview` this deploys the top-level config --
       # production's D1 and recherche-maison.com -- straight from dev.
       - if: github.ref == 'refs/heads/dev'

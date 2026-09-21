@@ -107,6 +107,17 @@ describe('the aggregate it renders from', () => {
     expect(pickAggregates(real, SAMPLE)).toBe(real)
   })
 
+  // A deploy is the one build that must never fall back: `rclone copyto` of a
+  // missing object exits 0 having copied nothing, and dev shipped the sample's
+  // two pages that way, green.
+  it('refuses the sample when the real one is required', () => {
+    const missing = join(tmp, 'required', 'aggregates.json')
+    expect(() => pickAggregates(missing, SAMPLE, true)).toThrow(/aggregates\.json/)
+    mkdirSync(join(tmp, 'required'), { recursive: true })
+    writeFileSync(missing, readFileSync(SAMPLE))
+    expect(pickAggregates(missing, SAMPLE, true)).toBe(missing)
+  })
+
   it('renders real pages from the committed sample alone', () => {
     const offline = treeAt('offline')
     const { pages } = prerenderInto(offline, SAMPLE)
