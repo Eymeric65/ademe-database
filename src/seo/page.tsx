@@ -148,7 +148,7 @@ a { color: var(--accent); }
    the app's own screens; .wrap is what lays these pages out. */
 .wrap > main { max-width: none; padding: 0; }
 h1 { max-width: none; }
-.scroll { overflow-x: auto; }
+.scroll { overflow-x: auto; margin-top: 1.6rem; }
 .lede { color: var(--muted); max-width: 42rem; }
 .figures { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); margin: 1.6rem 0 0; }
 .figures > div { border: 1px solid var(--border); border-radius: 3px; background: var(--surface); padding: 0.7rem 0.9rem; }
