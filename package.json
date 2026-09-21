@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev --env preview --var BETTER_AUTH_SECRET:local-development-only-not-a-real-secret",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && tsx scripts/prerender.tsx",
     "stage:duckdb": "node scripts/stage-duckdb.mjs",
     "seed:r2": "node scripts/seed-r2.mjs",
     "check": "tsc --noEmit && vitest run && npm run test:db && npm run db:check",

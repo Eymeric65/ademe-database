@@ -107,6 +107,9 @@ class Loader:
         it, `load_page` skips what it already has. See ADR-0014.
         """
         self.conn.execute(ddl.BAD_ROW_DDL)
+        led = {r[1] for r in self.conn.execute("PRAGMA table_info(ingest_departement)")}
+        if led and "upstream_high_water" not in led:
+            self.conn.execute("ALTER TABLE ingest_departement ADD COLUMN upstream_high_water TEXT")
         self.conn.execute(
             f"CREATE UNIQUE INDEX IF NOT EXISTS ux_dpe_numero ON dpe({self.m.key})"
         )
@@ -449,10 +452,13 @@ def ingest_departement(conn, loader: Loader, client, code: str, *, quiet=False) 
     start_url = led["next_cursor"] if led else None
     loaded = led["rows_loaded"] if led else 0
     if not led:
+        # At the first start only: a resumed departement's earlier pages are
+        # the older snapshot, and its mark must cover them. ADR-0041.
         conn.execute(
             "INSERT INTO ingest_departement"
-            " (code_departement, total_expected, started_at) VALUES (?,?,datetime())",
-            (code, expected),
+            " (code_departement, total_expected, started_at, upstream_high_water)"
+            " VALUES (?,?,datetime(),?)",
+            (code, expected, api.high_water(client, source=loader.source)),
         )
         conn.commit()
 

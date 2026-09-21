@@ -82,7 +82,10 @@ def test_a_merge_keeps_the_sources_own_search_index(base, source, tmp_path):
         base, tmp_path / "delta-out" / export_parquet.VERSION / "neuf-like", merged, source=source
     )
     assert touched == ["09"]
-    assert _names(merged / "search" / "dept=09" / "part-0000.parquet") == list(COLUMNS)
+    assert _names(merged / "search" / "dept=09" / "part-0000.parquet") == [
+        *COLUMNS,
+        export_parquet.WITHDRAWN,
+    ]
     got = duckdb.connect().execute(
         f"SELECT etiquette_dpe FROM read_parquet('{merged / 'dpe' / 'dept=09' / 'part-0000.parquet'}')"
         " WHERE numero_dpe = '2409N0000002'"
@@ -117,7 +120,10 @@ def test_reconciliation_asks_the_sources_own_dataset(base, source, tmp_path, mon
 
     out = tmp_path / "reconciled"
     delta.apply_deletions(base, report, out, source=source)
-    assert _names(out / "search" / "dept=09" / "part-0000.parquet") == list(COLUMNS)
+    assert _names(out / "search" / "dept=09" / "part-0000.parquet") == [
+        *COLUMNS,
+        export_parquet.WITHDRAWN,
+    ]
 
 
 def test_the_delta_is_fetched_from_the_sources_dataset_into_its_schema(base, source, tmp_path, monkeypatch):
@@ -132,11 +138,12 @@ def test_the_delta_is_fetched_from_the_sources_dataset_into_its_schema(base, sou
         yield Page()
 
     monkeypatch.setattr(delta.api, "iter_pages", pages)
+    monkeypatch.setattr(delta.api, "high_water", lambda _c, *, source=None: fake.sources.append(source))
     manifest = json.loads((base / "manifest.json").read_text())
     path = tmp_path / "fetched.sqlite"
 
     assert delta.fetch_delta(None, "2026-09-01", path, manifest, source=source) == 1
-    assert fake.sources == [source]
+    assert fake.sources == [source, source]
     conn = db.connect(path)
     assert conn.execute("SELECT dataset FROM data_source").fetchone()[0] == "neuf-like"
     columns = {r[0] for r in conn.execute("SELECT column_name FROM column_meta")}

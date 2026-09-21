@@ -108,6 +108,10 @@ class FakeApi:
         self.sources.append(source)
         return 1
 
+    def high_water(self, _client, *, source=None):
+        self.sources.append(source)
+        return "2026-09-07"
+
     def iter_pages(self, _client, *, departement=None, start_url=None, source=None, **_kw):
         self.sources.append(source)
 
@@ -124,9 +128,10 @@ def test_a_departement_is_fetched_from_the_loaders_own_dataset(neuf, monkeypatch
     fake = FakeApi()
     monkeypatch.setattr(ingest.api, "total", fake.total)
     monkeypatch.setattr(ingest.api, "iter_pages", fake.iter_pages)
+    monkeypatch.setattr(ingest.api, "high_water", fake.high_water)
 
     assert ingest.ingest_departement(conn, loader, None, "09", quiet=True) == 1
-    assert fake.sources == [neuf, neuf]
+    assert fake.sources == [neuf, neuf, neuf]
 
 
 def test_the_departements_are_listed_from_the_sources_own_dataset(neuf):

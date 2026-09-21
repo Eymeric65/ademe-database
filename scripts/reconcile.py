@@ -19,6 +19,40 @@ from ademe import api, delta, export_parquet
 from ademe.config import EXISTANT, SOURCES
 
 
+def _heal(args, source) -> int:
+    """Reconcile and repair: the deletions and the refetched rows in one tree.
+
+    A hole is not news any more. Reconciliation finds the ids upstream has and
+    this tree does not, counting by the key (ADR-0040); counting by the
+    modification date finds the rows held here at a stale version, and the rows
+    a mark that was too late hid (ADR-0041). Both are fetched whole and merged.
+    See ADR-0043.
+    """
+    try:
+        healed = delta.heal(
+            api.client(),
+            args.root,
+            args.out / export_parquet.VERSION / source.subdir,
+            source=source,
+            max_repair=args.max_repair,
+            max_hole_days=args.max_hole_days,
+            quiet=False,
+        )
+    except delta.ReconcileError as exc:
+        print(f"::error::{exc}", file=sys.stderr)
+        return 1
+
+    if healed.clean():
+        print("every partition agrees with ADEME, on both axes")
+        return 0
+    gone = sum(len(g) for g in healed.gone.values())
+    print(
+        f"repaired {len(healed.fetched)} row(s), deleted {gone},"
+        f" rewrote {len(healed.touched)} partition(s): {', '.join(healed.touched)}"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     # NOT type=Path. Path("https://x/v1") collapses the double slash to
@@ -30,8 +64,30 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--out", type=Path, help="where to write the corrected files")
     ap.add_argument("--source", default=EXISTANT.slug, choices=sorted(SOURCES))
+    ap.add_argument(
+        "--repair",
+        action="store_true",
+        help="also fetch what is missing here, on both axes (ADR-0043)",
+    )
+    ap.add_argument(
+        "--max-repair",
+        type=int,
+        default=delta.MAX_REPAIR,
+        help="rows this run repairs on its own before it stops for a human",
+    )
+    ap.add_argument(
+        "--max-hole-days",
+        type=int,
+        default=delta.MAX_HOLE_DAYS,
+        help="days holding more rows upstream before this run calls it a republication",
+    )
     args = ap.parse_args(argv)
     source = SOURCES[args.source]
+
+    if args.repair:
+        if not args.out:
+            ap.error("--repair needs --out")
+        return _heal(args, source)
 
     report = delta.reconcile(api.client(), args.root, quiet=False, source=source)
     divergent = {d: r for d, r in report.items() if not r.clean()}

@@ -118,6 +118,19 @@ test('the presentation is the first entry of the menu, and a page of its own', a
   ).toHaveCount(0)
 })
 
+test('Statistiques leads out of the app to the index of départements', async ({ page }) => {
+  await page.goto('/')
+
+  const tab = page
+    .getByRole('navigation', { name: 'Principal' })
+    .getByRole('link', { name: 'Statistiques' })
+  await expect(tab).toHaveAttribute('href', '/departements')
+  await tab.click()
+
+  await expect(page).toHaveURL(/\/departements$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Statistiques par département')
+})
+
 test('signed in, the landing page is still the search', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('presentation'))
   await page.goto('/')

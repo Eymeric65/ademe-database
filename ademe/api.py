@@ -70,6 +70,16 @@ def _departement_qs(code: str, source: Source = EXISTANT) -> str:
     return f'{field}:"{code}"'
 
 
+def _where(departement: str | None, qs: str | None, source: Source) -> str | None:
+    """Both, AND-ed, when both are given: reconcile counts a key range within
+    a departement."""
+    if departement and qs:
+        return f"({_departement_qs(departement, source)}) AND ({qs})"
+    if departement:
+        return _departement_qs(departement, source)
+    return qs
+
+
 def total(
     client: httpx.Client,
     *,
@@ -78,11 +88,16 @@ def total(
     source: Source = EXISTANT,
 ) -> int:
     params: dict = {"size": 0}
-    if departement:
-        params["qs"] = _departement_qs(departement, source)
-    elif qs:
-        params["qs"] = qs
+    if where := _where(departement, qs, source):
+        params["qs"] = where
     return _get(client, f"{source.api}/lines", params).json()["total"]
+
+
+def high_water(client: httpx.Client, *, source: Source = EXISTANT) -> str | None:
+    """The newest modification date the dataset holds now, as ISO. A fetch
+    that starts now sees every row modified up to it. See ADR-0041."""
+    params = {"metric": "max", "field": source.mapping.modified}
+    return _get(client, f"{source.api}/metric_agg", params).json().get("metric")
 
 
 def values(
@@ -141,10 +156,8 @@ def iter_pages(
     else:
         url = f"{source.api}/lines"
         params = {"size": page_size, "format": "csv", "sort": "_i"}
-        if departement:
-            params["qs"] = _departement_qs(departement, source)
-        elif qs:
-            params["qs"] = qs
+        if where := _where(departement, qs, source):
+            params["qs"] = where
         if select:
             params["select"] = ",".join(select)
 

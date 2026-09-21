@@ -1196,16 +1196,16 @@
       "codes": [
         "48"
       ],
-      "rows": 400,
+      "rows": 385,
       "search": {
         "path": "search/dept=48/part-0000.parquet",
-        "bytes": 18310,
-        "sha256": "e23fd7624b0af30f84a44575bf7cdb65ac54292778ae0c82d046da01b83de40d"
+        "bytes": 18536,
+        "sha256": "5161c9565e4177a950b79942cf7a7c96d93080b3bec892d9734befe13be3c5a0"
       },
       "dpe": {
         "path": "dpe/dept=48/part-0000.parquet",
-        "bytes": 182006,
-        "sha256": "8abe103cebeaa10fb304ec46de7bbf1e83bde0d9361378913c9108adb3194ac3"
+        "bytes": 182232,
+        "sha256": "d5db2353c7df53385551f43badd72adb8833e8c08309189a2c0606ce1259d82b"
       },
       "recent": {
         "rows": 14,

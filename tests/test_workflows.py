@@ -1,9 +1,10 @@
-"""The weekly job updates every source, one after another, in one job.
+"""The weekly job updates every source, each in a job of its own, one at a time.
 
-ADEME allows one polite stream per caller (CLAUDE.md §11). A matrix, or a job
-per source, would run the sources' fetches in parallel from one address. And a
-source registered in `config.SOURCES` but missing from the job would simply
-stop being updated, with nothing anywhere to say so. See ADR-0027.
+ADEME allows one polite stream per caller (CLAUDE.md §11), so the source jobs
+run one after another, never side by side. Each has its own runner, disk and
+timeout, so one source failing or running long no longer takes the others down
+with it. A source registered in `config.SOURCES` but missing from the matrix
+would simply stop being updated, with nothing anywhere to say so. See ADR-0042.
 
 Read as text rather than as YAML: the assertions are about order and presence,
 and a YAML parser would be a dependency for one test.
@@ -11,6 +12,7 @@ and a YAML parser would be a dependency for one test.
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -23,46 +25,99 @@ def _text() -> str:
     return WORKFLOW.read_text(encoding="utf-8")
 
 
-def _others() -> list[str]:
-    """Every source but existing housing, in registry order."""
-    return [slug for slug in SOURCES if slug != "existant"]
+def _jobs() -> dict[str, str]:
+    """Each job in etl-weekly.yml, by name, as its text."""
+    jobs = _text().split("\njobs:\n", 1)[1]
+    parts = re.split(r"^  ([\w-]+):\s*$", jobs, flags=re.M)
+    return dict(zip(parts[1::2], parts[2::2]))
 
 
-def test_the_weekly_job_is_one_job_without_a_matrix():
+def _steps() -> list[str]:
+    return re.split(r"^      - ", _text(), flags=re.M)[1:]
+
+
+def _matrix() -> list[str]:
+    """The sources a scheduled run updates, in the order it updates them."""
+    whole = re.search(r"^      matrix:\n        source: \$\{\{ (.+) \}\}$", _text(), re.M)
+    assert whole, "the matrix is not a single `source:` list"
+    # The other list in the expression is the one-source template, `["{0}"]`.
+    lists = [s for s in re.findall(r"'(\[[^']*\])'", whole.group(1)) if "{0}" not in s]
+    assert len(lists) == 1, f"expected the full source list once in the matrix: {whole.group(1)}"
+    return json.loads(lists[0])
+
+
+def test_each_source_is_its_own_job_one_at_a_time():
+    """A matrix without `max-parallel: 1` fetches every source at once from one
+    address; with `fail-fast` left on, one source failing cancels the rest."""
+    jobs = _jobs()
+    # `pages` rebuilds the aggregate once the sources are done, and is not one
+    # of the per-source legs. See ADR-0046.
+    assert list(jobs) == ["source", "pages"], f"unexpected jobs: {list(jobs)}"
+    job = jobs["source"]
+    assert re.search(r"^      max-parallel: 1$", job, re.M), "source jobs may run side by side"
+    assert re.search(r"^      fail-fast: false$", job, re.M), "one source failing cancels the others"
+    assert re.search(r"^    timeout-minutes: \d+$", job, re.M), "no per-source timeout"
+
+
+def test_every_registered_source_is_updated_in_registry_order():
+    assert _matrix() == list(SOURCES)
+
+
+def test_each_job_takes_its_tree_from_the_registry():
+    """`v1` for existing housing and `v1/<subdir>` for the rest, from
+    `Source.subdir` rather than a second copy of the paths here."""
     text = _text()
-    assert "matrix" not in text
-    jobs = text.split("\njobs:\n", 1)[1]
-    names = re.findall(r"^  ([\w-]+):\s*$", jobs, re.M)
-    assert names == ["delta"]
+    assert "SOURCES[sys.argv[1]].subdir" in text
+    assert 'echo "TREE=v1${sub:+/$sub}" >> "$GITHUB_ENV"' in text
+    assert re.search(r"^      SOURCE: \$\{\{ matrix\.source \}\}$", text, re.M)
 
 
-def test_every_registered_source_is_updated_by_the_weekly_job():
-    text = _text()
-    missing = [slug for slug in _others() if f"ademe.delta --source {slug}" not in text]
-    assert not missing, f"registered but never updated weekly: {missing}"
+def test_a_manual_run_can_target_one_source():
+    inputs = _text().split("  workflow_dispatch:\n", 1)[1].split("\nconcurrency:", 1)[0]
+    source = re.search(r"^      source:\n(.*?)(?=^      \w)", inputs, re.M | re.S)
+    assert source, "workflow_dispatch has no `source` input"
+    options = re.search(r"options: \[([^\]]*)\]", source.group(1))
+    assert options and [o.strip() for o in options.group(1).split(",")] == ["all", *SOURCES]
+    matrix = re.search(r"^        source: \$\{\{ (.+) \}\}$", _text(), re.M)
+    assert matrix and "inputs.source" in matrix.group(1)
 
 
-def test_the_sources_run_after_existing_housing_in_registry_order():
-    text = _text()
-    first = text.index("uv run python -m ademe.delta \\")
-    positions = [text.index(f"ademe.delta --source {slug}") for slug in _others()]
-    assert [first, *positions] == sorted([first, *positions])
+def test_a_dry_run_uploads_nothing():
+    """So a branch can be run live against the real bucket without publishing."""
+    assert re.search(r"^      dry_run:\n(?:        .*\n)*?        type: boolean$", _text(), re.M)
+    uploads = [s for s in _steps() if re.search(r"rclone copy(?:to)? publish/", s)]
+    assert uploads, "the weekly job uploads nothing"
+    for step in uploads:
+        guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
+        assert guard and "!inputs.dry_run" in guard.group(1), f"uploads on a dry run: {step.splitlines()[0]}"
 
 
 def test_each_source_is_reconciled_and_checked_before_it_is_uploaded():
     text = _text()
-    for slug in _others():
-        sub = SOURCES[slug].subdir
-        steps = [
-            f"ademe.delta --source {slug}",
-            f"scripts/reconcile.py --source {slug}",
-            f"scripts/check_delta.py --source {slug}",
-            f"rclone copy publish/recent/v1/{sub}/search",
-        ]
-        missing = [s for s in steps if s not in text]
-        assert not missing, f"{slug}: {missing}"
-        where = [text.index(s) for s in steps]
-        assert where == sorted(where), slug
+    steps = [
+        'ademe.recent join --from bucket --out base --source "$SOURCE"',
+        'ademe.delta --source "$SOURCE" --base-url "base/$TREE"',
+        'scripts/reconcile.py --source "$SOURCE"',
+        'scripts/check_delta.py --source "$SOURCE"',
+        'ademe.recent split --from "$from" --out publish --source "$SOURCE"',
+        "rclone copy publish/",
+    ]
+    missing = [s for s in steps if s not in text]
+    assert not missing, missing
+    where = [text.index(s) for s in steps]
+    assert where == sorted(where), f"out of order: {steps}"
+
+
+def test_a_hole_is_repaired_every_week_even_when_the_delta_fetched_nothing():
+    """A hole is not made by this week's modifications, so a repair gated on
+    them would wait for as long as the source stays quiet. Reconcile reads the
+    merged tree when the delta wrote one and the joined one when not, and it
+    repairs rather than printing a warning for somebody. See ADR-0043."""
+    step = next(s for s in _steps() if "scripts/reconcile.py" in s)
+    assert "--repair" in step and "--max-repair" in step
+    assert 'root=out; [ -f "out/$TREE/manifest.json" ] || root=base' in step
+    head = step[: step.index("scripts/reconcile.py")]
+    assert "exit 0" not in head, "a quiet week exits before the repair"
 
 
 def test_the_weekly_job_reads_the_published_trees_from_r2_not_the_public_domain():
@@ -75,21 +130,21 @@ def test_the_weekly_job_reads_the_published_trees_from_r2_not_the_public_domain(
     text = _text()
     assert "data.recherche-maison.com" not in text
     assert "DATA_BASE_URL" not in text
-    for slug in SOURCES:
-        sub = SOURCES[slug].subdir
-        base = f"base/v1/{sub}".rstrip("/")
-        delta = (
-            text.index("uv run python -m ademe.delta \\")
-            if slug == "existant"
-            else text.index(f"ademe.delta --source {slug}")
-        )
-        bucket = f"bucket/v1/{sub}".rstrip("/")
-        fetch = re.search(rf"rclone copy(?:to)? r2:ademe-dpe/v1/{re.escape(sub)}\S* {re.escape(bucket)}", text)
-        assert fetch and fetch.start() < delta, f"{slug}: no download from R2 before its delta"
-        # The download is joined back into the whole tree the delta reads (ADR-0039).
-        join = text.find(f"ademe.recent join --from bucket --out base --source {slug}")
-        assert fetch.start() < join < delta, f"{slug}: the download is not joined into base before its delta"
-        assert f'--base-url "{base}"' in text or f"--base-url {base}" in text, f"{slug}: delta not on the R2 copy"
+    fetch = re.search(r"rclone copy(?:to)? r2:ademe-dpe/\$TREE/\S* bucket/\$TREE/", text)
+    join = text.find('ademe.recent join --from bucket --out base --source "$SOURCE"')
+    delta = text.find('ademe.delta --source "$SOURCE" --base-url "base/$TREE"')
+    assert fetch, "no download from R2"
+    assert fetch.start() < join < delta, "the download is not joined into base before the delta"
+
+
+def test_the_weekly_job_prints_as_it_goes_and_uses_the_api_key():
+    """Run #2 (2026-09-14) was killed after 60 minutes in which reconcile had
+    printed nothing: Python block-buffers a piped stdout, and a killed process
+    never flushes. And without the key every step ran at ADEME's anonymous
+    rate. Both are job-wide, so every step inherits them."""
+    env = _text().split("\n    env:\n", 1)[1].split("\n    steps:\n", 1)[0]
+    assert re.search(r'^      PYTHONUNBUFFERED: "1"$', env, re.M)
+    assert re.search(r"^      ADEME_API_KEY: \$\{\{ secrets\.ADEME_API_KEY \}\}$", env, re.M)
 
 
 def _upload(text: str, local: str) -> int:
@@ -103,22 +158,17 @@ def test_each_source_uploads_its_manifest_after_its_files():
     LAST: it names the other three, and a reader must never be pointed at a file
     that is not there yet. See ADR-0039."""
     text = _text()
-    for sub in ["", *(f"{SOURCES[s].subdir}/" for s in _others())]:
-        stages = [
-            [f"recent/v1/{sub}{kind}" for kind in ("search", "dpe", "index", "manifest.json")],
-            [f"v1/{sub}recent-counts"],
-            [f"v1/{sub}{kind}" for kind in ("search", "dpe", "index")],
-            [f"v1/{sub}manifest.json"],
-        ]
-        where = [[_upload(text, local) for local in stage] for stage in stages]
-        never = [local for stage, at in zip(stages, where) for local, i in zip(stage, at) if i < 0]
-        assert not never, f"{sub or 'v1/'}: never uploaded: {never}"
-        for before, after in zip(where, where[1:]):
-            assert max(before) < min(after), f"{sub or 'v1/'}: uploaded out of order: {stages}"
-
-
-def _delta_at(text: str, slug: str) -> int:
-    return text.find("uv run python -m ademe.delta \\" if slug == "existant" else f"ademe.delta --source {slug}")
+    stages = [
+        [f"recent/$TREE/{kind}" for kind in ("search", "dpe", "index", "manifest.json")],
+        ["$TREE/recent-counts"],
+        [f"$TREE/{kind}" for kind in ("search", "dpe", "index")],
+        ["$TREE/manifest.json"],
+    ]
+    where = [[_upload(text, local) for local in stage] for stage in stages]
+    never = [local for stage, at in zip(stages, where) for local, i in zip(stage, at) if i < 0]
+    assert not never, f"never uploaded: {never}"
+    for before, after in zip(where, where[1:]):
+        assert max(before) < min(after), f"uploaded out of order: {stages}"
 
 
 def test_each_source_is_joined_after_its_recent_download_and_split_before_its_upload():
@@ -127,27 +177,15 @@ def test_each_source_is_joined_after_its_recent_download_and_split_before_its_up
     recent row uploaded unsplit would be in `v1/`, which every signed-in caller
     reads. See ADR-0039."""
     text = _text()
-    for slug in SOURCES:
-        sub = SOURCES[slug].subdir
-        recent = f"recent/v1/{sub}".rstrip("/")
-        fetch = re.search(rf"rclone copy r2:ademe-dpe/{re.escape(recent)}\S* bucket/{re.escape(recent)}", text)
-        join = re.search(rf"ademe\.recent join --from bucket --out base --source {slug}\s*$", text, re.M)
-        split = re.search(rf"ademe\.recent split\b.* --out publish --source {slug}\s*$", text, re.M)
-        assert fetch, f"{slug}: its recent tree is never downloaded"
-        assert join, f"{slug}: never joined"
-        assert split, f"{slug}: never split"
-        prefix = f"{sub}/" if sub else ""
-        uploads = [
-            m.start()
-            for m in re.finditer(
-                rf"rclone copy(?:to)? publish/(?:recent/)?v1/{re.escape(prefix)}"
-                r"(?:search|dpe|index|recent-counts|manifest\.json)\s",
-                text,
-            )
-        ]
-        assert uploads, f"{slug}: never uploaded"
-        order = [fetch.start(), join.start(), _delta_at(text, slug), split.start(), min(uploads)]
-        assert order == sorted(order), f"{slug}: not download < join < delta < split < upload: {order}"
+    fetch = re.search(r"rclone copy r2:ademe-dpe/recent/\$TREE/\S* bucket/recent/\$TREE/", text)
+    join = text.find('ademe.recent join --from bucket --out base --source "$SOURCE"')
+    delta = text.find('ademe.delta --source "$SOURCE"')
+    split = text.find('ademe.recent split --from "$from" --out publish --source "$SOURCE"')
+    upload = re.search(r"rclone copy(?:to)? publish/", text)
+    assert fetch, "the recent tree is never downloaded"
+    assert upload, "never uploaded"
+    order = [fetch.start(), join, delta, split, upload.start()]
+    assert -1 not in order and order == sorted(order), f"not download < join < delta < split < upload: {order}"
 
 
 def test_every_upload_is_from_the_split_tree_to_the_same_path():
@@ -163,9 +201,9 @@ def test_a_source_is_split_and_uploaded_even_when_nothing_changed():
     """TRAP: rows age out of the paid window every week whether or not ADEME
     changed anything. A split or an upload gated on the delta would leave them
     paid-only for as long as the source stays quiet."""
-    steps = re.split(r"^      - ", _text(), flags=re.M)[1:]
+    steps = _steps()
     n = sum("ademe.recent split" in step for step in steps)
-    assert n == len(SOURCES), f"{n} split step(s) for {len(SOURCES)} sources"
+    assert n == 1, f"{n} split step(s); the matrix job splits once per source"
     for step in steps:
         splits = "ademe.recent split" in step
         if not (splits or re.search(r"rclone copy(?:to)? publish/", step)):
@@ -225,3 +263,97 @@ def test_dev_deploys_the_preview_and_only_main_deploys_production():
         ("deploy", "github.ref == 'refs/heads/dev'"): "--env preview",
         ("deploy", "github.ref == 'refs/heads/main'"): "",
     }
+
+
+def test_a_recovery_run_can_be_told_how_many_hole_days_to_chase():
+    """`MAX_HOLE_DAYS` stops a scheduled run that found a republication rather
+    than a hole. A tree that has never been repaired trips it too, and until
+    the cap was a dispatch input the only way past it was to edit the constant
+    and push. It is a dial beside `max_repair` now. See ADR-0046."""
+    text = _text()
+    assert re.search(
+        r"^      max_hole_days:\n(?:        .*\n)*?        default: '\d+'$", text, re.M
+    ), "no max_hole_days input"
+    step = next(s for s in _steps() if "scripts/reconcile.py" in s)
+    assert "--max-hole-days" in step, "the input never reaches the repair"
+
+
+# The aggregate behind the public departement pages is rebuilt from the tree the
+# weekly run has just published, put on R2 beside the manifest, and fetched by
+# every build. See ADR-0046.
+
+
+def _pages_steps() -> list[str]:
+    return re.split(r"^      - ", _jobs()["pages"], flags=re.M)[1:]
+
+
+def test_the_aggregate_is_rebuilt_from_the_published_tree_after_every_source():
+    """Not a step inside the matrix leg: that leg is one source at a time and
+    Python-only, and a quiet week still has to refresh the pages. The job reads
+    `search/` alone -- the narrow tree -- never `dpe/`."""
+    jobs = _jobs()
+    assert "pages" in jobs, "etl-weekly.yml never rebuilds the aggregate"
+    assert re.search(r"^    needs: source$", jobs["pages"], re.M), "the aggregate is built first"
+    text = jobs["pages"]
+    download = re.search(r"rclone copy r2:ademe-dpe/v1/search\s", text)
+    manifest = re.search(r"rclone copyto r2:ademe-dpe/v1/manifest\.json\s", text)
+    build = text.find("ademe.aggregate")
+    assert download and manifest, "the published tree is never downloaded"
+    assert build > 0, "the aggregate is never built"
+    assert max(download.start(), manifest.start()) < build, "built before it is downloaded"
+    assert "r2:ademe-dpe/v1/dpe" not in text, "the wide tree is downloaded for nothing"
+
+
+def test_the_aggregate_is_uploaded_beside_the_manifest_and_not_on_a_dry_run():
+    """`publish/` mirrors the bucket here too, so
+    `test_every_upload_is_from_the_split_tree_to_the_same_path` covers it."""
+    out = re.search(r"--out publish/v1/aggregates\.json", _jobs()["pages"])
+    assert out, "the aggregate is not written to the path it is uploaded from"
+    upload = [s for s in _pages_steps() if "r2:ademe-dpe/v1/aggregates.json" in s]
+    assert upload, "the aggregate is never uploaded"
+    for step in upload:
+        guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
+        assert guard and "!inputs.dry_run" in guard.group(1), "a dry run publishes the aggregate"
+def test_the_weekly_deploy_is_production_and_only_ever_from_main():
+    """TRAP: `workflow_dispatch` runs from whatever branch it was launched on.
+    Unguarded, a dispatch from a feature branch would build that branch and put
+    it on recherche-maison.com. The schedule runs on the default branch, which
+    is main, and that is the only ref this may deploy."""
+    for step in _pages_steps():
+        run = re.search(r"run:\s*npx wrangler deploy\b(.*)$", step, re.M)
+        if not run:
+            continue
+        assert run.group(1).strip() == "", "the weekly run deploys somewhere other than production"
+        guard = re.search(r"^\s*if:\s*(.+?)\s*$", step, re.M)
+        assert guard, "unguarded `wrangler deploy` in the weekly run"
+        assert "github.ref == 'refs/heads/main'" in guard.group(1), guard.group(1)
+        assert "!inputs.dry_run" in guard.group(1), "a dry run deploys"
+
+
+def test_the_deploy_fetches_the_aggregate_before_it_builds():
+    """`vite build` prerenders the departement pages from whatever aggregate is
+    on disk, and ASSETS ships `dist/` whole. Fetched after the build -- or not at
+    all -- the deploy replaces a hundred and one indexed pages with nothing."""
+    deploy = _ci_jobs()["deploy"]
+    fetch = deploy.find("r2:ademe-dpe/v1/aggregates.json")
+    build = deploy.find("npm run build")
+    assert fetch >= 0, "the deploy never fetches the aggregate"
+    assert build >= 0, "the deploy never builds"
+    assert fetch < build, "the aggregate is fetched after the build that needed it"
+
+
+def test_the_fetch_is_not_allowed_to_fail_quietly():
+    """A fetch that fell back to the sample on a missing object would deploy two
+    pages over a hundred and one, green. The step carries no `|| true`, no
+    `continue-on-error`, and no `if:` that would skip it on a push."""
+    step = next(s for s in _ci_jobs()["deploy"].split("      - ") if "aggregates.json" in s)
+    assert "|| true" not in step and "continue-on-error" not in step
+    assert not re.search(r"^\s*if:", step, re.M), "the fetch is skippable"
+
+
+def test_the_bucket_credentials_reach_only_the_job_that_deploys():
+    """The e2e job builds with no credentials on purpose: it is the proof that a
+    build without them still produces pages. A key in every job would make that
+    proof impossible to keep."""
+    holders = {name for name, job in _ci_jobs().items() if "RCLONE_CONFIG_R2_" in job}
+    assert holders == {"deploy"}, f"bucket credentials in {holders}"

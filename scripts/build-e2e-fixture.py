@@ -35,7 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from ademe import api, cadastre, db, export_parquet, ingest, recent, rnb, schema, spec
+from ademe import api, cadastre, db, delta, export_parquet, ingest, recent, rnb, schema, spec
 from ademe.config import API, SOURCES
 
 # Ariege and Lozere: small, metropolitan, and far enough apart that a postcode
@@ -58,6 +58,15 @@ TREES = {"": ("existant", PER_DEPT), "neuf": ("neuf", 100), "tertiaire": ("terti
 FIXTURE_CUTOFF = date(2026, 7, 7)
 
 REFERENCE = ("rnb", "cadastre", "crosswalk")
+
+# The fixture's one withdrawn certificate. No published tree has one yet --
+# ADR-0044 shipped after the last base build -- so the fixture makes one, the
+# way a weekly run would. In DEPTS[1], which exists to prove partition
+# selection wrong, and DEPTS[0] is deliberately left without the column at all:
+# a search reads both partitions in ONE scan, so a fixture where both agreed
+# would never exercise the mixed-age tree the live one is during a run.
+WITHDRAWN_DEPT = DEPTS[1]
+WITHDRAWN_ON = date(2026, 9, 21)
 
 
 def _sha256(path: Path) -> str:
@@ -299,6 +308,62 @@ def split_all(root: Path, out: Path) -> dict:
     return {"existant_recent": dict(zip(fields, map(str, row))) if row else None}
 
 
+def withdraw_one(out: Path) -> dict:
+    """Tag one base-tree certificate withdrawn, exactly as a weekly run would.
+
+    Idempotent: the row is chosen by key, and `rows` is recounted from the file
+    rather than decremented, so a re-split does not walk the count down.
+    """
+    import duckdb
+
+    duck = duckdb.connect()
+    tree = out / export_parquet.VERSION
+    rel = Path(f"dept={WITHDRAWN_DEPT}") / "part-0000.parquet"
+    dpe, search = tree / "dpe" / rel, tree / "search" / rel
+    numero, address = duck.execute(
+        f"SELECT numero_dpe, adresse_ban FROM {_read(search)}"
+        " WHERE adresse_ban IS NOT NULL ORDER BY numero_dpe LIMIT 1"
+    ).fetchone()
+
+    sort = ", ".join(f'"{c}"' for c in export_parquet.SEARCH_SORT)
+    for path, order, row_group in (
+        (dpe, '"numero_dpe"', export_parquet.DPE_ROW_GROUP),
+        (search, sort, export_parquet.SEARCH_ROW_GROUP),
+    ):
+        duck.execute(
+            "CREATE OR REPLACE TABLE tagged AS SELECT * REPLACE ("
+            f"CASE WHEN numero_dpe = '{numero}' THEN DATE '{WITHDRAWN_ON}'"
+            f" ELSE {export_parquet.WITHDRAWN} END AS {export_parquet.WITHDRAWN})"
+            f" FROM {delta._wide(duck, _read(path))} ORDER BY {order}"
+        )
+        duck.execute(
+            f"COPY tagged TO '{path}'"
+            f" (FORMAT parquet, {export_parquet.COMPRESSION}, ROW_GROUP_SIZE {row_group})"
+        )
+
+    manifest = json.loads((tree / "manifest.json").read_text())
+    for part in manifest["partitions"]:
+        if part["dept"] != WITHDRAWN_DEPT:
+            continue
+        # Live rows, which is what the manifest has always counted (ADR-0044).
+        part["rows"] = duck.execute(
+            f"SELECT count(*) FROM {_read(dpe)}"
+            f" WHERE {export_parquet.WITHDRAWN} IS NULL"
+        ).fetchone()[0]
+        for kind, path in (("dpe", dpe), ("search", search)):
+            part[kind] = {**part[kind], "bytes": path.stat().st_size, "sha256": _sha256(path)}
+    (tree / "manifest.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False))
+    duck.close()
+    return {
+        "existant_withdrawn": {
+            "key": numero,
+            "address": address,
+            "on": WITHDRAWN_ON.isoformat(),
+            "dept": WITHDRAWN_DEPT,
+        }
+    }
+
+
 def install(built: Path, out: Path) -> None:
     """Replace `out`'s data trees with ROOT `built`'s, leaving the staged engine alone."""
     for top in (export_parquet.VERSION, recent.PREFIX):
@@ -333,6 +398,7 @@ def main(argv: list[str] | None = None) -> int:
                 targets = slice_published(src, work / "whole")
             targets |= split_all(work / "whole", work / "split")
             install(work / "split", args.out)
+            targets |= withdraw_one(args.out)
         print(json.dumps(targets, indent=2, ensure_ascii=False))
         return 0
 

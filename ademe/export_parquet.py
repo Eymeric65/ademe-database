@@ -22,6 +22,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import tempfile
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -69,6 +70,11 @@ SEARCH_COLUMNS = (
 )
 
 SEARCH_SORT = ("code_postal_ban", "etiquette_dpe", "surface_habitable_logement")
+
+# The date a weekly run found the certificate gone from ADEME; NULL while it is
+# live. A withdrawn certificate is tagged, never deleted -- see ADR-0044.
+WITHDRAWN = "withdrawn_on"
+WITHDRAWN_NULL = f"CAST(NULL AS DATE) AS {WITHDRAWN}"
 
 # Per source, by slug, and deliberately with no default: a search index is a
 # product decision, and a tertiary DPE has no `surface_habitable_logement`.
@@ -526,14 +532,17 @@ def export(
         dpe_path.parent.mkdir(parents=True, exist_ok=True)
         search_path.parent.mkdir(parents=True, exist_ok=True)
 
+        # SQLite holds only live certificates, so the tag is always NULL here.
+        # It is written all the same: a file without the column makes every
+        # reader of the published tree special-case it. See ADR-0044.
         duck.execute(
-            f"COPY (SELECT * FROM wide ORDER BY {key}) TO '{dpe_path}'"
+            f"COPY (SELECT *, {WITHDRAWN_NULL} FROM wide ORDER BY {key}) TO '{dpe_path}'"
             f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {DPE_ROW_GROUP})"
         )
         cols = ", ".join(f'"{c}"' for c in search_columns)
         order = ", ".join(f'"{c}"' for c in search_sort)
         duck.execute(
-            f"COPY (SELECT {cols} FROM wide ORDER BY {order}) TO '{search_path}'"
+            f"COPY (SELECT {cols}, {WITHDRAWN_NULL} FROM wide ORDER BY {order}) TO '{search_path}'"
             f" (FORMAT parquet, {COMPRESSION}, ROW_GROUP_SIZE {SEARCH_ROW_GROUP})"
         )
 
@@ -599,6 +608,33 @@ def export(
     return manifest
 
 
+def _high_water(conn, source: Source = EXISTANT) -> str | None:
+    """The oldest snapshot any departement was fetched from, not the newest
+    row: a batch ADEME published mid-build is below the newest row. ADR-0041."""
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(ingest_departement)")}
+    mark = "upstream_high_water" if "upstream_high_water" in columns else "NULL"
+    led = conn.execute(f"SELECT code_departement, {mark} FROM ingest_departement").fetchall()
+    marks = [r[1] for r in led if r[1]]
+    unmarked = sorted(r[0] for r in led if not r[1])
+    if marks and not unmarked:
+        return min(marks)
+    if marks:
+        print(
+            f"no high_water: {', '.join(unmarked)} recorded no snapshot, so any mark"
+            " could hide a hole. Give the delta --since.",
+            file=sys.stderr,
+        )
+        return None
+    high = conn.execute(f"SELECT MAX({source.mapping.modified}) FROM dpe").fetchone()[0]
+    if led:
+        print(
+            "high_water is the newest row, not the oldest snapshot: this build"
+            " recorded none (it predates ADR-0041) and the mark may hide a hole.",
+            file=sys.stderr,
+        )
+    return (date(1970, 1, 1) + timedelta(days=int(high))).isoformat() if high is not None else None
+
+
 def write_manifest(
     conn,
     root: Path,
@@ -607,16 +643,13 @@ def write_manifest(
     source: Source = EXISTANT,
 ) -> dict:
     src = conn.execute("SELECT * FROM data_source").fetchone()
-    high = conn.execute(f"SELECT MAX({source.mapping.modified}) FROM dpe").fetchone()[0]
     manifest = {
         "version": VERSION,
         "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "schema_sha256": src["schema_sha256"] if src else None,
         # The incremental key: the delta asks ADEME for everything modified
         # after this. Stored as ISO, not as the day count SQLite holds.
-        "high_water": (date(1970, 1, 1) + timedelta(days=int(high))).isoformat()
-        if high is not None
-        else None,
+        "high_water": _high_water(conn, source),
         # encoding and scale so a delta can rebuild a partition without the
         # SQLite build; `destination` because it is the only grouping of the 226
         # columns that means anything, and the browser has no other source for

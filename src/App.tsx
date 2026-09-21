@@ -169,6 +169,8 @@ export default function App() {
           >
             Présentation
           </a>
+          {/* A real path, not a hash route: the index is a prerendered page. */}
+          <a href="/departements">Statistiques</a>
           <a href="#/" aria-current={route.name === 'search' ? 'page' : undefined}>
             Rechercher
           </a>

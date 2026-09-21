@@ -696,6 +696,28 @@ h1 {
   color: var(--color-muted);
 }
 
+/* Vermilion, like the seal: a cancellation stamp is the one other thing that
+   ink marks a document with. Muted would read as one more fact about the
+   dwelling, and this is a fact about the certificate. See ADR-0044. */
+.hit-withdrawn {
+  margin: 0.3rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-vermilion);
+}
+
+.withdrawn {
+  margin: 0.8rem 0 0;
+  padding: 0.6rem 0.9rem;
+  border-left: 3px solid var(--ink-vermilion);
+  background: var(--ink-vermilion-soft);
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--color-text);
+}
+
 .hit-map,
 .back {
   display: inline-block;
@@ -1385,6 +1407,22 @@ a.signin {
   font-size: clamp(1.3rem, 1.1rem + 0.9vw, 1.7rem);
   line-height: 1.2;
   max-width: 24ch;
+}
+
+/*
+ * Only the prerendered /presentation carries this: in the app the masthead and
+ * the gate are the frame, and there is no footer. See src/seo/page.tsx.
+ */
+.pres-foot {
+  margin-top: 3rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 0.9rem;
+}
+
+.pres-foot p {
+  margin: 0 0 0.35rem;
 }
 
 /*

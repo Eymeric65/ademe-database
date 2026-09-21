@@ -1,0 +1,7 @@
+# Cloudflare answers /robots.txt with its own managed content-signals file:
+# comments only, no Allow, no Disallow, no Sitemap. A crawler reading it learns
+# nothing. This one is served from dist/ instead and carries the directives.
+User-agent: *
+Allow: /
+
+Sitemap: https://recherche-maison.com/sitemap.xml

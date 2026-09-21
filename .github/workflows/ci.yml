@@ -87,6 +87,14 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Read-only use of the weekly job's key, and only in this job: the e2e job
+      # builds with no credentials on purpose, because that is the build a
+      # laptop does. See ADR-0046.
+      RCLONE_CONFIG_R2_TYPE: s3
+      RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+      RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      RCLONE_CONFIG_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -96,7 +104,21 @@ jobs:
       # Same pin, same reason as the `node` job above.
       - run: npm install -g npm@11
       - run: npm ci
+      # TRAP: the departement pages are prerendered from this file and ASSETS
+      # ships `dist/` whole, so a deploy that built without it would replace a
+      # hundred and one indexed pages with the sample's two -- green, and
+      # silent. The fetch is deliberately unguarded: a missing object or a wrong
+      # key fails the deploy instead. See ADR-0046.
+      - name: Install rclone
+        run: sudo -v ; curl -fsSL https://rclone.org/install.sh | sudo bash
+      - name: Fetch the departement aggregate
+        run: rclone copyto r2:ademe-dpe/v1/aggregates.json src/seo/aggregates.json
+      # TRAP: `rclone copyto` of a missing object exits 0 having copied
+      # nothing, so the fetch alone guards nothing. This makes the build refuse
+      # to fall back to the sample instead.
       - run: npm run build
+        env:
+          AGGREGATES_REQUIRED: '1'
       # TRAP: without `--env preview` this deploys the top-level config --
       # production's D1 and recherche-maison.com -- straight from dev.
       - if: github.ref == 'refs/heads/dev'

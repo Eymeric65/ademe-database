@@ -51,7 +51,9 @@ NEUF_ABSENT = frozenset(
 # sha256 of existing housing's generated DDL, column_meta rows and indexes,
 # computed on the code before this change (dev + #23 + #24, 37d6a64). The
 # national build is loading into that schema right now; it must not move a byte.
-GOLDEN = "59a5e5c2102681d577c19691a62dedc3aa7a80030776117009b9cda1be0716bb"
+# Moved once, on purpose: ADR-0041's `ingest_departement.upstream_high_water`,
+# which the Loader adds to an older build before resuming it.
+GOLDEN = "ec5dc3a6bca92a58afbab76fbaed651bee0690b3e7324a1ee86389af65e3741a"
 
 ROW = {
     "numero_dpe": "2409N0000001",
