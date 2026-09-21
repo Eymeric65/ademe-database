@@ -18,7 +18,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { NAMES, deptSlug } from '../src/data/sources'
 import type { DepartementAggregate } from '../src/seo/page'
-import { ORIGIN, renderDepartementPage, renderPresentationPage } from '../src/seo/page'
+import {
+  ORIGIN,
+  renderDepartementPage,
+  renderDepartementsIndex,
+  renderPresentationPage,
+} from '../src/seo/page'
 
 export { ORIGIN }
 
@@ -71,7 +76,7 @@ export function stylesheetHref(indexHtml: string): string {
   if (!href) {
     throw new Error(
       'prerender: no <link rel="stylesheet"> in the built index.html; ' +
-        'refusing to write an unstyled /presentation',
+        'refusing to write unstyled pages',
     )
   }
   return href
@@ -102,6 +107,12 @@ export function prerenderInto(outDir: string, from = aggregatesPath()): { pages:
   const root = outDir.endsWith('/') ? outDir : `${outDir}/`
   mkdirSync(`${root}departement`, { recursive: true })
 
+  // Every page here links the app's stylesheet -- for the masthead, and for
+  // /presentation the whole page -- so every page needs the build's own
+  // index.html to name it.
+  const indexHtml = readFileSync(`${root}index.html`, 'utf8')
+  const stylesheet = stylesheetHref(indexHtml)
+
   const pages: string[] = []
   for (const code of codes) {
     const agg = data.departements[code] as DepartementAggregate
@@ -111,20 +122,26 @@ export function prerenderInto(outDir: string, from = aggregatesPath()): { pages:
       stamp,
       // Every OTHER département: 100 internal links per page is the crawl path.
       others: links.filter((l) => l.dept !== code),
+      stylesheet,
     })
     writeFileSync(`${root}departement/${slug}.html`, html)
     pages.push(`departement/${slug}`)
   }
 
-  // The Présentation, at an address a crawler can reach. It is the only page
-  // here that links a stylesheet rather than inlining one, so it is also the
-  // only one that needs the build's own index.html.
-  const indexHtml = readFileSync(`${root}index.html`, 'utf8')
-  writeFileSync(
-    `${root}presentation.html`,
-    renderPresentationPage({ stylesheet: stylesheetHref(indexHtml) }),
-  )
+  // The Présentation, at an address a crawler can reach.
+  writeFileSync(`${root}presentation.html`, renderPresentationPage({ stylesheet }))
   pages.push('presentation')
+
+  // The one page that links every département page: the « Statistiques » tab.
+  writeFileSync(
+    `${root}departements.html`,
+    renderDepartementsIndex({
+      rows: codes.map((code) => data.departements[code] as DepartementAggregate),
+      stamp,
+      stylesheet,
+    }),
+  )
+  pages.push('departements')
 
   const locs = ['/', ...pages.map((p) => `/${p}`)]
   const sitemap =

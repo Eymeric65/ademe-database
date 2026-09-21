@@ -114,9 +114,36 @@ describe('the aggregate it renders from', () => {
       'departement/ariege',
       'departement/haute-garonne',
       'presentation',
+      'departements',
     ])
     // Not a placeholder: the sample carries Ariège's own published numbers.
     expect(readFileSync(join(offline, 'departement/ariege.html'), 'utf8')).toContain('203,7')
+  })
+})
+
+/**
+ * A département page nothing links to is reachable only from a search result.
+ * /departements is the one page that links every one of them, and the tab that
+ * leads there is on every page, the app's included.
+ */
+describe('the index of départements', () => {
+  it('is written, listed in the sitemap, and links every page written', () => {
+    expect(written.pages).toContain('departements')
+    const xml = readFileSync(join(out, 'sitemap.xml'), 'utf8')
+    expect(xml).toContain(`<loc>${ORIGIN}/departements</loc>`)
+
+    const html = readFileSync(join(out, 'departements.html'), 'utf8')
+    const linked = [...html.matchAll(/href="\/(departement\/[^"]+)"/g)].map((m) => m[1])
+    expect(linked).toEqual(written.pages.filter((p) => p.startsWith('departement/')))
+  })
+
+  it('is one tab away from every static page', () => {
+    for (const page of ['departements', 'presentation', 'departement/ariege']) {
+      const html = readFileSync(join(out, `${page}.html`), 'utf8')
+      expect(html).toContain('<header class="masthead">')
+      expect(html).toContain('href="/departements"')
+      expect(html).toContain(`href="${CSS_HREF}"`)
+    }
   })
 })
 

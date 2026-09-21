@@ -7,9 +7,10 @@
  * at build time by scripts/prerender.tsx.
  *
  * They carry statistics only. No address, no certificate, nothing that would
- * move the login gate ADR-0012 put in front of the data -- and no script, no
- * stylesheet and no font beyond what is inlined below, so the page is complete
- * the moment the HTML arrives.
+ * move the login gate ADR-0012 put in front of the data -- and no script. The
+ * page's own styles are inlined below; the app's stylesheet is linked only so
+ * the masthead is the app's own, the way back into the site from a search
+ * result.
  */
 
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -41,6 +42,9 @@ export type Stamp = { highWater: string; dataBuiltAt: string }
 export type DeptLink = { dept: string; name: string; slug: string }
 
 export const ORIGIN = 'https://recherche-maison.com'
+
+const INDEX_URL = `${ORIGIN}/departements`
+const INDEX_TITLE = 'Statistiques par département'
 
 export const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G'] as const
 
@@ -139,12 +143,12 @@ h1, h2, h3 { font-family: 'Fraunces', Georgia, 'Times New Roman', serif; font-we
 h1 { font-size: clamp(1.7rem, 1.2rem + 2vw, 2.6rem); margin: 0 0 0.6rem; }
 h2 { font-size: 1.25rem; margin: 2.4rem 0 0.8rem; }
 a { color: var(--accent); }
-.wrap { max-width: 56rem; margin: 0 auto; padding: 0 1rem 3rem; }
-.mast {
-  border-bottom: 1px solid var(--border); margin-bottom: 1.6rem;
-}
-.mast div { max-width: 56rem; margin: 0 auto; padding: 0.7rem 1rem; }
-.mast a { font-family: 'Fraunces', Georgia, serif; font-weight: 620; text-decoration: none; }
+.wrap { max-width: 56rem; margin: 0 auto; padding: 1.6rem 1rem 3rem; }
+/* The app's stylesheet, linked for the masthead, also styles main and h1 for
+   the app's own screens; .wrap is what lays these pages out. */
+.wrap > main { max-width: none; padding: 0; }
+h1 { max-width: none; }
+.scroll { overflow-x: auto; }
 .lede { color: var(--muted); max-width: 42rem; }
 .figures { display: grid; gap: 0.7rem; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); margin: 1.6rem 0 0; }
 .figures > div { border: 1px solid var(--border); border-radius: 3px; background: var(--surface); padding: 0.7rem 0.9rem; }
@@ -196,6 +200,36 @@ footer { border-top: 1px solid var(--border); margin-top: 3rem; padding-top: 1.2
 .others a:hover { text-decoration: underline; }
 `
 
+type Tab = 'presentation' | 'statistiques'
+
+/**
+ * src/App.tsx's masthead, for the pages that run no JavaScript: the same
+ * classes, root-absolute paths instead of hash routes, and no account corner --
+ * there is no session here to show.
+ */
+function StaticMasthead({ current }: { current: Tab }) {
+  const here = (tab: Tab) => (tab === current ? ('page' as const) : undefined)
+  return (
+    <header className="masthead">
+      <a className="wordmark" href="/">
+        <span className="badge" data-letter="D" aria-hidden="true">
+          D
+        </span>
+        <span>recherche-maison</span>
+      </a>
+      <nav className="nav" aria-label="Principal">
+        <a href="/presentation" aria-current={here('presentation')}>
+          Présentation
+        </a>
+        <a href="/departements" aria-current={here('statistiques')}>
+          Statistiques
+        </a>
+        <a href="/">Rechercher</a>
+      </nav>
+    </header>
+  )
+}
+
 function Ramp({ rows, letters }: { rows: { key: string; label: string; count: number }[]; letters: boolean }) {
   const max = Math.max(1, ...rows.map((r) => r.count))
   const total = rows.reduce((sum, r) => sum + r.count, 0) || 1
@@ -229,17 +263,19 @@ function Ramp({ rows, letters }: { rows: { key: string; label: string; count: nu
 /**
  * The page, as a complete HTML document.
  *
- * Pure: everything it prints comes from `agg`, `stamp` and `others`, which is
- * what lets test/unit/seo-page.test.ts assert on it without a build.
+ * Pure: everything it prints comes from its arguments, which is what lets
+ * test/unit/seo-page.test.ts assert on it without a build.
  */
 export function renderDepartementPage({
   agg,
   stamp,
   others,
+  stylesheet,
 }: {
   agg: DepartementAggregate
   stamp: Stamp
   others: readonly DeptLink[]
+  stylesheet: string
 }): string {
   const name = NAMES[agg.dept] ?? agg.dept
   const slug = deptSlug(agg.dept)
@@ -298,7 +334,8 @@ export function renderDepartementPage({
     '@type': 'BreadcrumbList',
     itemListElement: [
       { '@type': 'ListItem', position: 1, name: 'recherche-maison', item: `${ORIGIN}/` },
-      { '@type': 'ListItem', position: 2, name: `${name} (${agg.dept})`, item: url },
+      { '@type': 'ListItem', position: 2, name: INDEX_TITLE, item: INDEX_URL },
+      { '@type': 'ListItem', position: 3, name: `${name} (${agg.dept})`, item: url },
     ],
   }
 
@@ -329,6 +366,8 @@ export function renderDepartementPage({
           type="font/woff2"
           crossOrigin="anonymous"
         />
+        {/* Before the inline <style>, so the page's own rules win a tie. */}
+        <link rel="stylesheet" href={stylesheet} />
         <style dangerouslySetInnerHTML={{ __html: CSS }} />
         <script
           type="application/ld+json"
@@ -340,11 +379,7 @@ export function renderDepartementPage({
         />
       </head>
       <body>
-        <header className="mast">
-          <div>
-            <a href="/">recherche-maison</a>
-          </div>
-        </header>
+        <StaticMasthead current="statistiques" />
 
         <div className="wrap">
           <main>
@@ -551,6 +586,166 @@ export function renderDepartementPage({
   return `<!doctype html>${markup}`
 }
 
+// --- every département, on one page -----------------------------------------
+
+/**
+ * /departements: one row per département page, and the only page that links
+ * all of them -- the « Statistiques » tab of every masthead leads here.
+ *
+ * `rows` arrive in the order they are printed (scripts/prerender.tsx sorts by
+ * code). The total is summed from the counts: the mean of a hundred shares
+ * weighs the Lozère like Paris.
+ */
+export function renderDepartementsIndex({
+  rows,
+  stamp,
+  stylesheet,
+}: {
+  rows: readonly DepartementAggregate[]
+  stamp: Stamp
+  stylesheet: string
+}): string {
+  const certificates = rows.reduce((sum, r) => sum + r.certificates, 0)
+  const passoires = rows.reduce((sum, r) => sum + r.passoires.count, 0)
+  const classed = rows.reduce((sum, r) => sum + r.passoires.classed, 0)
+  const cutoff = frenchDate(stamp.highWater)
+
+  const title = 'DPE par département : diagnostics, passoires thermiques et consommation'
+  const description =
+    `${fmt(certificates)} DPE publics dans ${rows.length} départements : part de passoires ` +
+    'thermiques (F+G) et consommation médiane, département par département.'
+
+  const breadcrumb = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'recherche-maison', item: `${ORIGIN}/` },
+      { '@type': 'ListItem', position: 2, name: INDEX_TITLE, item: INDEX_URL },
+    ],
+  }
+
+  const markup = renderToStaticMarkup(
+    <html lang="fr">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{title}</title>
+        <meta name="description" content={description} />
+        <link rel="canonical" href={INDEX_URL} />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={description} />
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={INDEX_URL} />
+        <meta property="og:locale" content="fr_FR" />
+        <meta property="og:site_name" content="recherche-maison" />
+        <meta name="twitter:card" content="summary" />
+        <meta name="theme-color" content="#1f4e79" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link
+          rel="preload"
+          href="/fonts/fraunces-roman-latin.woff2"
+          as="font"
+          type="font/woff2"
+          crossOrigin="anonymous"
+        />
+        <link rel="stylesheet" href={stylesheet} />
+        <style dangerouslySetInnerHTML={{ __html: CSS }} />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }}
+        />
+      </head>
+      <body>
+        <StaticMasthead current="statistiques" />
+
+        <div className="wrap">
+          <main>
+            <h1>{INDEX_TITLE}</h1>
+            <p className="lede">
+              Les diagnostics de performance énergétique publiés par l’ADEME, département par
+              département : combien il y en a, quelle part de passoires thermiques, quelle
+              consommation. Chaque ligne mène au détail.
+            </p>
+
+            <div className="scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Département</th>
+                    <th scope="col" className="n">
+                      Diagnostics
+                    </th>
+                    <th scope="col" className="n">
+                      Passoires (F+G)
+                    </th>
+                    <th scope="col" className="n">
+                      Conso. médiane
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.dept}>
+                      <th scope="row">
+                        <a href={`/departement/${deptSlug(r.dept)}`}>
+                          {r.dept} {NAMES[r.dept] ?? r.dept}
+                        </a>
+                      </th>
+                      <td className="n">{fmt(r.certificates)}</td>
+                      <td className="n">
+                        {r.passoires.share == null ? '—' : pct(r.passoires.share)}
+                      </td>
+                      <td className="n">
+                        {r.conso_ep_kwh_m2 ? dec(r.conso_ep_kwh_m2.median) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <th scope="row">Ensemble</th>
+                    <td className="n">{fmt(certificates)}</td>
+                    <td className="n">{classed ? pct(passoires / classed) : '—'}</td>
+                    <td className="n">—</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <p className="note">
+              Consommation d’énergie primaire médiane, en kWhEP/m²/an. Une médiane ne s’additionne
+              pas : la ligne « Ensemble » n’en donne pas.
+            </p>
+
+            <p className="cta">
+              <a href="/">Retrouver le diagnostic d’un logement</a>
+            </p>
+
+            <section>
+              <h2>D’où viennent ces chiffres</h2>
+              <p className="note">
+                Ils sont calculés sur les diagnostics de logements existants publiés par l’ADEME.
+                Les données s’arrêtent au {cutoff}. Ne sont pas listés les diagnostics non
+                géocodés, ni ceux de Saint-Pierre-et-Miquelon, Mayotte, Saint-Barthélemy et
+                Saint-Martin, regroupés dans un seul ensemble.
+              </p>
+              <p className="note">
+                Source : ADEME, « DPE logements existants », publiée sous{' '}
+                <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence">
+                  Licence Ouverte / Open Licence (Etalab)
+                </a>
+                . Agrégats calculés le {frenchDate(stamp.dataBuiltAt)} par recherche-maison.
+              </p>
+            </section>
+          </main>
+        </div>
+      </body>
+    </html>,
+  )
+
+  return `<!doctype html>${markup}`
+}
+
 // --- the présentation, at a URL of its own ----------------------------------
 
 const PRES_URL = `${ORIGIN}/presentation`
@@ -617,20 +812,7 @@ export function renderPresentationPage({ stylesheet }: { stylesheet: string }): 
         <link rel="stylesheet" href={stylesheet} />
       </head>
       <body>
-        <header className="masthead">
-          <a className="wordmark" href="/">
-            <span className="badge" data-letter="D" aria-hidden="true">
-              D
-            </span>
-            <span>recherche-maison</span>
-          </a>
-          <nav className="nav" aria-label="Principal">
-            <a href="/presentation" aria-current="page">
-              Présentation
-            </a>
-            <a href="/">Rechercher</a>
-          </nav>
-        </header>
+        <StaticMasthead current="presentation" />
 
         <main>
           {/*
