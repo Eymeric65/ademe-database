@@ -20,6 +20,15 @@ export function mapsHref(lat: number, lon: number): string {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`
 }
 
+/** The gold tab on what only a paid plan shows. */
+export function Premium() {
+  return (
+    <span className="premium" title="Moins de deux mois : réservé aux membres payants">
+      Premium
+    </span>
+  )
+}
+
 /** "3 certificats plus récents", agreed in number -- and in gender, for audit steps. */
 export function newerLabel(n: number, audit: boolean): string {
   const [one, many] = audit
@@ -140,6 +149,7 @@ export function Results({
                   </a>
                 ) : null}
               </div>
+              {hit.recent ? <Premium /> : null}
             </li>
           ))}
         </ul>

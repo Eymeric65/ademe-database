@@ -261,6 +261,8 @@ export type Record_ = {
   /** The partition it was read from, which is what saving it records. */
   dept: string
   meta: Record<string, ColumnMeta>
+  /** Read from the paid tree (ADR-0039). */
+  recent: boolean
 }
 
 /**
@@ -314,11 +316,11 @@ export async function detail(ref: DetailRef, paid: boolean): Promise<Record_ | n
   const m = await manifest(src.subdir)
   const meta = m.column_meta ?? {}
   const found = await lookup(src, tree(src.subdir), new Set(m.partitions.map((p) => p.dept)), ref)
-  if (found) return { ...found, meta }
+  if (found) return { ...found, meta, recent: false }
   if (!paid || !m.recent) return null
   const known = new Set(m.partitions.filter((p) => p.recent?.rows).map((p) => p.dept))
   const recent = await lookup(src, recentTree(m), known, ref)
-  return recent ? { ...recent, meta } : null
+  return recent ? { ...recent, meta, recent: true } : null
 }
 
 // --- building and parcel ----------------------------------------------------

@@ -44,6 +44,12 @@
   --vermilion-soft: #f1d9ce;
   --vermilion-soft-dark: #38190f;
 
+  /* Gold leaf -- "kin", for what a paid plan opens. */
+  --gold-ink: #8a6a12;
+  --gold-ink-dark: #e0bc55;
+  --gold-soft: #f3e6bd;
+  --gold-soft-dark: #3a2f10;
+
   /* Type set ON an ink block: paper on a light-mode ink, sumi on a bright one. */
   --ink-contrast-light: #faf7f0;
   --ink-contrast-dark: #17140e;
@@ -85,6 +91,9 @@
   --ink-vermilion-soft: var(--vermilion-soft);
   --ink-contrast: var(--ink-contrast-light);
 
+  --ink-gold: var(--gold-ink);
+  --ink-gold-soft: var(--gold-soft);
+
   /* The offset a stamp casts. Mixed toward the fixed sumi primitive so it stays
      darker than whichever ink is on top of it, in both schemes. */
   --stamp: color-mix(in oklab, var(--color-accent) 45%, var(--neutral-900));
@@ -108,6 +117,9 @@
     --ink-vermilion: var(--vermilion-ink-dark);
     --ink-vermilion-soft: var(--vermilion-soft-dark);
     --ink-contrast: var(--ink-contrast-dark);
+
+    --ink-gold: var(--gold-ink-dark);
+    --ink-gold-soft: var(--gold-soft-dark);
   }
 }
 
@@ -646,6 +658,7 @@ h1 {
  * than the row lifting: fifty rows that each lift is a page that shivers.
  */
 .hit {
+  position: relative;
   display: flex;
   gap: 1rem;
   padding: 0.9rem 0 0.9rem 0.85rem;
@@ -787,6 +800,39 @@ h1 {
 }
 
 /* --- the last two months, for paid members (ADR-0039) ------------------- */
+
+/* Gold, not an ink the page already uses: it marks what the plan opens, and
+   nothing else on the page may read as that. */
+.premium {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  vertical-align: 0.15em;
+  border: 1px solid var(--ink-gold);
+  border-radius: var(--radius-tight);
+  background: var(--ink-gold-soft);
+  color: var(--ink-gold);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+/* A tab hanging from the row's top rule, like an index card's. */
+.hit > .premium {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  margin: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.hit:has(> .premium) .hit-body {
+  padding-right: 4.5rem;
+}
 
 /*
  * Placeholder rows under a blur, the count printed across them. Nothing under
