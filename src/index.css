@@ -555,7 +555,10 @@ h1 {
     order: 3;
     width: 100%;
     margin-right: 0;
-    gap: 1rem;
+    gap: 0.5rem 1rem;
+    /* Five links do not fit 390 px on one line; unwrapped, the last ones
+       ran off the screen with nothing to scroll them back. */
+    flex-wrap: wrap;
   }
   /* The address bar is not the place for an email. "Se déconnecter" already
      says somebody is signed in, and dropping it is what keeps the header two
@@ -818,6 +821,49 @@ h1 {
   letter-spacing: 0.1em;
   line-height: 1.4;
   text-transform: uppercase;
+}
+
+/* The « Abonnement » page. The offer carries the same gold as the tab it
+   buys, so the two read as one thing. */
+.subscription .lede + .lede {
+  margin-top: 0.75rem;
+}
+
+.subscription .actions {
+  margin-top: 1.75rem;
+}
+
+.offer {
+  margin-top: 1.75rem;
+  max-width: 36rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border: 1px solid var(--ink-gold);
+  border-top-width: 4px;
+  border-radius: var(--radius-tight);
+  background: var(--color-surface);
+}
+
+.offer-price {
+  margin: 0 0 1rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink-gold);
+}
+
+.offer ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.offer .actions {
+  margin: 1.5rem 0 0;
+}
+
+.offer .error {
+  margin: 1rem 0 0;
 }
 
 /* A tab hanging from the row's top rule, like an index card's. */

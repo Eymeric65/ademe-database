@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useSession } from './auth'
-import { parse, useRoute } from './routes'
+import { parse, takeCheckoutReturn, useRoute } from './routes'
+import { Subscription } from './billing/Subscription'
 import { search, type Hit } from './data/duck'
 import { Detail } from './detail/Detail'
 import { Presentation } from './presentation/Presentation'
@@ -149,8 +150,15 @@ function Badge({ letter }: { letter: string }) {
   )
 }
 
+/**
+ * Read once, as the module loads: before the first render parses the hash,
+ * and outside React. TRAP: in a useState initializer StrictMode would call
+ * it twice, and the second call finds the query already cleared.
+ */
+const RETURNED = takeCheckoutReturn()
+
 export default function App() {
-  const { account, loading, signInWithGoogle, signOut } = useSession()
+  const { account, loading, refresh, signInWithGoogle, signOut } = useSession()
   const route = useRoute()
   useSearchScroll(route.name === 'search')
 
@@ -179,6 +187,9 @@ export default function App() {
               Enregistrés
             </a>
           ) : null}
+          <a href="#/abonnement" aria-current={route.name === 'subscription' ? 'page' : undefined}>
+            Abonnement
+          </a>
         </nav>
 
         {/* Nothing is rendered until /api/me has answered: showing the
@@ -221,6 +232,13 @@ export default function App() {
             hero
             signedIn={Boolean(account)}
             onSignIn={() => void signInWithGoogle()}
+          />
+        ) : route.name === 'subscription' ? (
+          <Subscription
+            account={account ?? null}
+            returned={RETURNED}
+            onSignIn={() => void signInWithGoogle()}
+            refresh={refresh}
           />
         ) : route.name === 'saved' ? (
           <Saved signedIn={Boolean(account)} />

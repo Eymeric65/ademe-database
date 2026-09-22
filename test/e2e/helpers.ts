@@ -37,6 +37,28 @@ export async function makePaid(page: Page, email: string): Promise<void> {
   if (me.plan !== 'paid') throw new Error(`${email} is still ${me.plan} after the UPDATE`)
 }
 
+/**
+ * Give an account a Stripe subscription the way the webhook leaves one: a row
+ * in `subscription` (ADR-0047). Stripe itself is not in the loop -- the
+ * webhook's side is tested in test/db/billing.test.ts -- so this writes the
+ * row directly, on the same D1 `makePaid` writes to.
+ */
+export function subscribe(
+  email: string,
+  { status = 'active', days = 30, cancelAtPeriodEnd = false } = {},
+): void {
+  if (!/^[a-z0-9-]+@example\.test$/.test(email)) throw new Error(`not a test account: ${email}`)
+  const tag = email.split('@')[0]
+  execFileSync('npx', [
+    'wrangler', 'd1', 'execute', 'ademe-app-preview', '--env', 'preview',
+    process.env.E2E_BASE_URL ? '--remote' : '--local',
+    '--command',
+    'INSERT INTO subscription (id, user_id, subscription_id, customer_id, status, paid_until, cancel_at_period_end) ' +
+      `SELECT 'cs_e2e_${tag}', id, 'sub_e2e_${tag}', 'cus_e2e_${tag}', '${status}', ` +
+      `unixepoch() + ${Math.round(days * 86400)}, ${cancelAtPeriodEnd ? 1 : 0} FROM user WHERE email = '${email}'`,
+  ], { stdio: 'pipe' })
+}
+
 export function uniqueEmail(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`
 }

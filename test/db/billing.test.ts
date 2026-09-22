@@ -309,6 +309,27 @@ describe('what entitles', () => {
   })
 })
 
+describe('what /api/me says about billing', () => {
+  it('gives a subscriber their status and the portal, with their email filled in', async () => {
+    const cookie = await paid('portal@example.test', 'cs_p', 'sub_p', { status: 'past_due' })
+    expect(await me(cookie)).toMatchObject({
+      plan: 'free',
+      subscriptionStatus: 'past_due',
+      manageUrl: 'https://billing.stripe.invalid/p/login/test?prefilled_email=portal%40example.test',
+    })
+  })
+
+  it('gives a free member no status and nothing to manage', async () => {
+    const cookie = await signUp('never@example.test')
+    expect(await me(cookie)).toMatchObject({ plan: 'free', subscriptionStatus: null, manageUrl: null })
+  })
+
+  it('gives nothing to manage while a checkout is only opened', async () => {
+    const cookie = await checkedOut('opened@example.test', 'cs_q')
+    expect(await me(cookie)).toMatchObject({ subscriptionStatus: null, manageUrl: null })
+  })
+})
+
 describe('with Stripe unconfigured', () => {
   async function call(path: string, overrides: Partial<Env>): Promise<number> {
     const route = ROUTES.find((r) => r.path === path)

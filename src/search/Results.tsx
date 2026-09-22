@@ -60,7 +60,7 @@ function RecentLocked({ newer, audit }: { newer: number; audit: boolean }) {
         ))}
       </div>
       <p className="recent-locked-note">
-        {newerLabel(newer, audit)} — devenez membre payant pour y accéder
+        {newerLabel(newer, audit)} — <a href="#/abonnement">devenez membre payant pour y accéder</a>
       </p>
     </li>
   )

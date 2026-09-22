@@ -44,7 +44,9 @@
 
     // The live €5/month price. The key and webhook secret are secrets, and the
     // billing routes answer 503 until they and this are set. See ADR-0047.
-    "STRIPE_PRICE_ID": ""
+    "STRIPE_PRICE_ID": "",
+    // Stripe's Customer Portal login link, live mode. Not a secret.
+    "STRIPE_PORTAL_URL": ""
   },
 
   "env": {
@@ -79,7 +81,9 @@
         // database, so this makes the Worker refuse one. See ADR-0047.
         "STRIPE_TEST_MODE_ONLY": "1",
         // The test-mode €5/month price. Production has its own, live one.
-        "STRIPE_PRICE_ID": "price_1UIYRhFKfmPFWcVBe7xXC9zP"
+        "STRIPE_PRICE_ID": "price_1UIYRhFKfmPFWcVBe7xXC9zP",
+        // The test-mode portal's login link.
+        "STRIPE_PORTAL_URL": ""
       },
       "d1_databases": [
         {

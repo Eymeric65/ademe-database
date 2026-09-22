@@ -432,6 +432,7 @@ test('a free member is told how many newer certificates match, and shown none', 
   await expect(page.locator('.recent-locked')).toContainText(
     '1 certificat plus récent — devenez membre payant pour y accéder',
   )
+  await expect(page.locator('.recent-locked-note a')).toHaveAttribute('href', '#/abonnement')
   await expect(page.locator('.map-recent-note')).toHaveText('1 certificat plus récent non affiché sur la carte')
   // The blurred rows are placeholders: nothing in them is the certificate.
   await expect(page.getByText(RECENT.address)).toHaveCount(0)
