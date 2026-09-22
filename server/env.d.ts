@@ -38,6 +38,12 @@ interface Env {
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_PRICE_ID?: string
 
+  /**
+   * The login link of Stripe's hosted Customer Portal, where a member cancels
+   * or changes their card. Not a secret. Unset, /api/me offers no link.
+   */
+  STRIPE_PORTAL_URL?: string
+
   /** '1' refuses any key that is not a test-mode key. Preview only -- see server/stripe.ts. */
   STRIPE_TEST_MODE_ONLY?: string
 }

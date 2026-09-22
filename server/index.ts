@@ -101,7 +101,7 @@ export const ROUTES: Route[] = [
       // here would mean the two disagreed. Fail closed rather than guess.
       if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
       const { id, name, email } = session.user
-      return json({ id, name, email, plan: await planOf(env, caller), ...(await termsOf(env, caller)) })
+      return json({ id, name, email, plan: await planOf(env, caller), ...(await termsOf(env, caller, email)) })
     },
   },
 
@@ -301,18 +301,32 @@ export const ROUTES: Route[] = [
 /** Statuses in which Stripe will still charge, paid for or not. */
 const LIVE: string[] = ['trialing', 'active', 'past_due', 'unpaid', 'paused']
 
+type Terms = {
+  subscriptionStatus: string | null
+  renewsOn: string | null
+  endsOn: string | null
+  manageUrl: string | null
+}
+
 /**
- * When the caller's subscription renews or ends, as ISO dates, for /api/me.
- * Only a date that still entitles is shown; a lapsed one is just free.
+ * The caller's subscription, for /api/me: its status as Stripe last said it,
+ * when it renews or ends (ISO dates, only while it still entitles), and where
+ * to manage it -- Stripe's hosted portal, with the account's email filled in.
+ * A checkout opened and never paid is not a subscription yet.
  */
-async function termsOf(env: Env, caller: Caller): Promise<{ renewsOn: string | null; endsOn: string | null }> {
+async function termsOf(env: Env, caller: Caller, email: string): Promise<Terms> {
   const sub = await subscriptionOf(env, caller)
+  if (!sub) return { subscriptionStatus: null, renewsOn: null, endsOn: null, manageUrl: null }
+  const manageUrl = env.STRIPE_PORTAL_URL
+    ? `${env.STRIPE_PORTAL_URL}?prefilled_email=${encodeURIComponent(email)}`
+    : null
   const now = Math.floor(Date.now() / 1000)
-  if (!sub || !ENTITLING.includes(sub.status as never) || sub.paidUntil == null || sub.paidUntil + GRACE_SECONDS <= now) {
-    return { renewsOn: null, endsOn: null }
+  const base = { subscriptionStatus: sub.status, manageUrl }
+  if (!ENTITLING.includes(sub.status as never) || sub.paidUntil == null || sub.paidUntil + GRACE_SECONDS <= now) {
+    return { ...base, renewsOn: null, endsOn: null }
   }
   const day = new Date(sub.paidUntil * 1000).toISOString().slice(0, 10)
-  return sub.cancelAtPeriodEnd ? { renewsOn: null, endsOn: day } : { renewsOn: day, endsOn: null }
+  return sub.cancelAtPeriodEnd ? { ...base, renewsOn: null, endsOn: day } : { ...base, renewsOn: day, endsOn: null }
 }
 
 /**
