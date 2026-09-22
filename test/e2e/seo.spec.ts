@@ -131,6 +131,24 @@ test('the index of départements links every page, under the app’s masthead', 
   await expect(page).toHaveURL(/\/departements$/)
 })
 
+test('the terms of sale and the legal notice are one click from the présentation, with no script', async ({
+  page,
+}) => {
+  await page.goto('/presentation')
+  await page.getByRole('link', { name: 'Conditions générales de vente' }).click()
+  await expect(page).toHaveURL(/\/cgv$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Conditions générales de vente')
+  await expect(page.locator('body')).toContainText('5 € TTC par mois')
+  await expect(page.locator('header.masthead')).toHaveCSS('position', 'sticky')
+  expect(await page.locator('script').count()).toBe(0)
+
+  // Exact: section 8 of the terms links « mentions légales » too.
+  await page.getByRole('link', { name: 'Mentions légales', exact: true }).click()
+  await expect(page).toHaveURL(/\/mentions-legales$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Mentions légales')
+  await expect(page.locator('body')).toContainText('Cloudflare')
+})
+
 test('the sitemap carries the présentation', async ({ page }) => {
   const res = await page.request.get('/sitemap.xml')
   expect(res.status()).toBe(200)

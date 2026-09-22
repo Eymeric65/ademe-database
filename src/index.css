@@ -1471,6 +1471,25 @@ a.signin {
   margin: 0 0 0.35rem;
 }
 
+/* The prerendered /cgv and /mentions-legales: plain reading, one measure. */
+.legal {
+  max-width: 42rem;
+}
+
+.legal h1 {
+  max-width: none;
+}
+
+.legal h2 {
+  margin: 2rem 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+.legal p {
+  margin: 0 0 0.75rem;
+  line-height: 1.6;
+}
+
 /*
  * The specimen: an invented listing and the certificate behind it, stacked in
  * one grid cell so the certificate overlaps the listing like a sheet laid on
