@@ -19,7 +19,9 @@ export const PUBLISHER = {
   /** « TVA non applicable, art. 293 B du CGI » under the franchise en base. */
   vat: 'TVA non applicable, art. 293 B du CGI',
   /** The consumer mediator every seller to consumers must name (art. L612-1). */
-  mediator: '[à compléter : nom et site du médiateur de la consommation]',
+  mediator:
+    'CM2C, 49 rue de Ponthieu, 75008 Paris, tél. 01 89 47 00 14, litiges@cm2c.net, ' +
+    'https://www.cm2c.net/declarer-un-litige.php',
 }
 
 const SITE = 'recherche-maison.com'
