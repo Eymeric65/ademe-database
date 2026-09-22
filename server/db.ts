@@ -22,7 +22,7 @@
 import { betterAuth } from 'better-auth'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { oAuthProxy } from 'better-auth/plugins'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, max, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/d1'
 import { migrate } from '../db/migrate'
 import * as s from '../db/schema'
@@ -49,20 +49,131 @@ function open(env: { DB: D1Database }) {
 export type Plan = 'free' | 'paid'
 
 /**
+ * How long past the end of a period a subscription still reads. Stripe rolls
+ * the period over and charges up to an hour later, and the webhook saying so
+ * arrives after that: without slack a renewing member whose webhook is late
+ * would lose the paid tree. See ADR-0047.
+ */
+export const GRACE_SECONDS = 24 * 60 * 60
+
+/** The statuses Stripe says are paid for. `past_due` is not: the money did not come. */
+export const ENTITLING: readonly (typeof s.SUBSCRIPTION_STATUSES)[number][] = ['active', 'trialing']
+
+/**
  * The caller's plan, read fresh on every call so a downgrade takes effect on
  * the next request rather than when a session expires.
  *
- * Only the exact value 'paid' is paid. No row, an empty subject or anything
- * the CHECK somehow let through is free: the gate fails closed. See ADR-0038.
+ * Paid is exactly `plan = 'paid'` (an operator's comp, ADR-0038) or one of the
+ * caller's subscriptions in an entitling status with its period not yet over
+ * (ADR-0047). The period is checked as well as the status so that webhooks
+ * that stop arriving cannot keep an account paid for ever. No row, an empty
+ * subject or anything the CHECK somehow let through is free: the gate fails
+ * closed.
  */
-export async function planOf(env: { DB: D1Database }, caller: Caller): Promise<Plan> {
+export async function planOf(
+  env: { DB: D1Database },
+  caller: Caller,
+  now = Math.floor(Date.now() / 1000),
+): Promise<Plan> {
   const rows = await open(env)
-    .select({ plan: s.user.plan })
+    .select({ plan: s.user.plan, paidUntil: max(s.subscription.paidUntil) })
     .from(s.user)
+    .leftJoin(
+      s.subscription,
+      and(eq(s.subscription.userId, s.user.id), inArray(s.subscription.status, [...ENTITLING])),
+    )
     .where(eq(s.user.id, caller.sub))
+    .groupBy(s.user.id)
     .limit(1)
     .all()
-  return rows[0]?.plan === 'paid' ? 'paid' : 'free'
+  const row = rows[0]
+  if (row?.plan === 'paid') return 'paid'
+  return row?.paidUntil != null && row.paidUntil + GRACE_SECONDS > now ? 'paid' : 'free'
+}
+
+// --- subscriptions ---------------------------------------------------------
+
+/** The caller's most recent checkout that became a subscription, or null. */
+export async function subscriptionOf(env: { DB: D1Database }, caller: Caller) {
+  const rows = await open(env)
+    .select()
+    .from(s.subscription)
+    .where(and(eq(s.subscription.userId, caller.sub), isNotNull(s.subscription.subscriptionId)))
+    // rowid breaks a tie between two checkouts opened in the same second.
+    .orderBy(desc(s.subscription.createdAt), desc(sql`rowid`))
+    .limit(1)
+    .all()
+  return rows[0] ?? null
+}
+
+/**
+ * The one place a subscription row is born: the caller's own checkout.
+ *
+ * The webhook never inserts (see `applyCheckout`), so this is what ties a
+ * Stripe subscription to an account -- and only its owner can make the tie.
+ */
+export async function recordCheckout(env: { DB: D1Database }, caller: Caller, input: { id: string }) {
+  const at = Math.floor(Date.now() / 1000)
+  return open(env)
+    .insert(s.subscription)
+    .values({ id: input.id, userId: caller.sub, status: 'pending', createdAt: at, updatedAt: at })
+    .returning()
+}
+
+type Facts = {
+  subscriptionId: string
+  customerId: string
+  status: (typeof s.SUBSCRIPTION_STATUSES)[number]
+  paidUntil: number | null
+  cancelAtPeriodEnd: boolean
+}
+
+/**
+ * Write what Stripe says a checkout became.
+ *
+ * Callerless on purpose, like `applySubscription`: the webhook has no session.
+ * It is safe because it can only UPDATE a row by its Checkout Session id -- a
+ * row some owner's checkout created -- and never inserts. A session nobody
+ * here opened changes zero rows. See ADR-0047.
+ */
+export async function applyCheckout(env: { DB: D1Database }, checkoutId: string, facts: Facts): Promise<number> {
+  const rows = await open(env)
+    .update(s.subscription)
+    .set({ ...facts, updatedAt: Math.floor(Date.now() / 1000) })
+    .where(eq(s.subscription.id, checkoutId))
+    .returning({ id: s.subscription.id })
+  return rows.length
+}
+
+/** Write what Stripe says about a subscription a checkout already became. Callerless; see above. */
+export async function applySubscription(env: { DB: D1Database }, facts: Facts): Promise<number> {
+  const rows = await open(env)
+    .update(s.subscription)
+    .set({ ...facts, updatedAt: Math.floor(Date.now() / 1000) })
+    .where(eq(s.subscription.subscriptionId, facts.subscriptionId))
+    .returning({ id: s.subscription.id })
+  return rows.length
+}
+
+/**
+ * Does some owner's checkout know this Stripe object? Asked before the webhook
+ * spends Stripe calls on an id that would change nothing here.
+ */
+export async function isKnownBilling(
+  env: { DB: D1Database },
+  ref: { checkoutId: string } | { subscriptionId: string },
+): Promise<boolean> {
+  const rows = await open(env)
+    .select({ id: s.subscription.id })
+    .from(s.subscription)
+    .where(
+      'checkoutId' in ref
+        ? eq(s.subscription.id, ref.checkoutId)
+        : eq(s.subscription.subscriptionId, ref.subscriptionId),
+    )
+    .limit(1)
+    .all()
+  return rows.length > 0
 }
 
 // --- saved buildings -------------------------------------------------------

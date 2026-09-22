@@ -40,7 +40,11 @@
     // Better Auth builds its OAuth redirect from this, so it must be the host
     // Google was told about. Previews leave it unset and fall back to the
     // request's own origin -- see authFor() in server/db.ts.
-    "BETTER_AUTH_URL": "https://recherche-maison.com"
+    "BETTER_AUTH_URL": "https://recherche-maison.com",
+
+    // The live €5/month price. The key and webhook secret are secrets, and the
+    // billing routes answer 503 until they and this are set. See ADR-0047.
+    "STRIPE_PRICE_ID": ""
   },
 
   "env": {
@@ -68,7 +72,14 @@
         // TRAP: preview only, like AUTH_TEST_CREDENTIALS. The one preview host
         // registered with Google: every branch preview's Google sign-in goes
         // through it and comes back. See ADR-0036.
-        "OAUTH_PROXY_URL": "https://ademe-app-preview.eymeric-chauchat.workers.dev"
+        "OAUTH_PROXY_URL": "https://ademe-app-preview.eymeric-chauchat.workers.dev",
+
+        // TRAP: test mode, never live, on anything that is not production. A
+        // preview with a live key would take real money into the preview
+        // database, so this makes the Worker refuse one. See ADR-0047.
+        "STRIPE_TEST_MODE_ONLY": "1",
+        // The test-mode €5/month price. Production has its own, live one.
+        "STRIPE_PRICE_ID": "price_1UIYRhFKfmPFWcVBe7xXC9zP"
       },
       "d1_databases": [
         {
