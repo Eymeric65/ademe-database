@@ -78,7 +78,8 @@
         // preview with a live key would take real money into the preview
         // database, so this makes the Worker refuse one. See ADR-0047.
         "STRIPE_TEST_MODE_ONLY": "1",
-        "STRIPE_PRICE_ID": ""
+        // The test-mode €5/month price. Production has its own, live one.
+        "STRIPE_PRICE_ID": "price_1UIYRhFKfmPFWcVBe7xXC9zP"
       },
       "d1_databases": [
         {
