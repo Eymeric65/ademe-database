@@ -10,14 +10,14 @@
 
 export const PUBLISHER = {
   /** Nom et prénom de l'entrepreneur individuel, ou dénomination sociale. */
-  name: '[à compléter : nom et prénom, ou dénomination sociale]',
+  name: 'Eymeric Chauchat',
   /** Forme juridique, e.g. « entrepreneur individuel (micro-entreprise) ». */
-  status: '[à compléter : forme juridique]',
-  siret: '[à compléter : numéro SIRET]',
-  address: '[à compléter : adresse postale]',
+  status: 'entrepreneur individuel (EI), nom commercial Chauquest',
+  siret: '109 335 455 00019',
+  address: '173 rue de Courcelles, 75017 Paris',
   email: '[à compléter : adresse e-mail de contact]',
   /** « TVA non applicable, art. 293 B du CGI » under the franchise en base. */
-  vat: '[à compléter : mention TVA — par exemple « TVA non applicable, art. 293 B du CGI »]',
+  vat: 'TVA non applicable, art. 293 B du CGI',
   /** The consumer mediator every seller to consumers must name (art. L612-1). */
   mediator: '[à compléter : nom et site du médiateur de la consommation]',
 }
