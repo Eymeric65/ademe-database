@@ -15,7 +15,7 @@ export const PUBLISHER = {
   status: 'entrepreneur individuel (EI), nom commercial Chauquest',
   siret: '109 335 455 00019',
   address: '173 rue de Courcelles, 75017 Paris',
-  email: '[à compléter : adresse e-mail de contact]',
+  email: 'eymeric.chauchat@gmail.com',
   /** « TVA non applicable, art. 293 B du CGI » under the franchise en base. */
   vat: 'TVA non applicable, art. 293 B du CGI',
   /** The consumer mediator every seller to consumers must name (art. L612-1). */
