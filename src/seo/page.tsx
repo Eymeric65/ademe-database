@@ -15,6 +15,7 @@
 
 import { renderToStaticMarkup } from 'react-dom/server'
 import { NAMES, deptSlug } from '../data/sources'
+import { Cgv, MentionsLegales } from '../legal/Legal'
 import { Presentation } from '../presentation/Presentation'
 
 export type ClassCounts = Record<string, number>
@@ -207,7 +208,7 @@ type Tab = 'presentation' | 'statistiques'
  * classes, root-absolute paths instead of hash routes, and no account corner --
  * there is no session here to show.
  */
-function StaticMasthead({ current }: { current: Tab }) {
+function StaticMasthead({ current }: { current?: Tab }) {
   const here = (tab: Tab) => (tab === current ? ('page' as const) : undefined)
   return (
     <header className="masthead">
@@ -227,6 +228,15 @@ function StaticMasthead({ current }: { current: Tab }) {
         <a href="/">Rechercher</a>
       </nav>
     </header>
+  )
+}
+
+/** The terms of sale and the legal notice, at the foot of every static page. */
+function LegalLinks() {
+  return (
+    <p className="note">
+      <a href="/cgv">Conditions générales de vente</a> · <a href="/mentions-legales">Mentions légales</a>
+    </p>
   )
 }
 
@@ -577,6 +587,7 @@ export function renderDepartementPage({
               <a href="/">recherche-maison</a> — le diagnostic public d’un logement, à partir de ce
               qu’une annonce en dit. <a href="/presentation">Ce que contient la base</a>.
             </p>
+            <LegalLinks />
           </footer>
         </div>
       </body>
@@ -738,6 +749,10 @@ export function renderDepartementsIndex({
               </p>
             </section>
           </main>
+
+          <footer>
+            <LegalLinks />
+          </footer>
         </div>
       </body>
     </html>,
@@ -836,6 +851,62 @@ export function renderPresentationPage({ stylesheet }: { stylesheet: string }): 
               </a>
               .
             </p>
+            <LegalLinks />
+          </footer>
+        </main>
+      </body>
+    </html>,
+  )
+
+  return `<!doctype html>${markup}`
+}
+
+// --- the terms of sale and the legal notice ---------------------------------
+
+const LEGAL_PAGES = {
+  cgv: {
+    title: 'Conditions générales de vente — recherche-maison',
+    description:
+      'L’abonnement à recherche-maison : ce qu’il donne, son prix, son renouvellement et sa résiliation.',
+    Body: Cgv,
+  },
+  'mentions-legales': {
+    title: 'Mentions légales — recherche-maison',
+    description:
+      'Éditeur, hébergeur, données publiques réutilisées et données personnelles de recherche-maison.',
+    Body: MentionsLegales,
+  },
+} as const
+
+export type LegalPage = keyof typeof LEGAL_PAGES
+
+/**
+ * src/legal/Legal.tsx, at /cgv and /mentions-legales. Static pages rather than
+ * hash routes: they must be readable by anybody, a payment provider's
+ * reviewer included, without running the app. Like the Présentation, they
+ * link the app's stylesheet and ship no script.
+ */
+export function renderLegalPage({ page, stylesheet }: { page: LegalPage; stylesheet: string }): string {
+  const { title, description, Body } = LEGAL_PAGES[page]
+  const url = `${ORIGIN}/${page}`
+  const markup = renderToStaticMarkup(
+    <html lang="fr">
+      <head>
+        <meta charSet="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>{title}</title>
+        <meta name="description" content={description} />
+        <link rel="canonical" href={url} />
+        <meta name="theme-color" content="#1f4e79" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+        <link rel="stylesheet" href={stylesheet} />
+      </head>
+      <body>
+        <StaticMasthead />
+        <main>
+          <Body />
+          <footer className="pres-foot">
+            <LegalLinks />
           </footer>
         </main>
       </body>
