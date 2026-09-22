@@ -462,3 +462,27 @@ test('a paid member gets the newest certificate first, and opens it', async ({ p
   await page.getByRole('link', { name: RECENT.address }).click()
   await expect(page.getByRole('heading', { name: RECENT.address })).toBeVisible({ timeout: 30_000 })
 })
+
+test('a paid member sees which certificates their plan gives them, in the list and on the page', async ({ page }) => {
+  const email = uniqueEmail('recent-premium')
+  await signUpViaApi(page, email)
+  await makePaid(page, email)
+  await searchTarget(page, { wide: true })
+
+  // Only the paid tree's row carries the tab: the rest are free to everyone.
+  const hit = page.locator('.hit', { hasText: RECENT.address })
+  await expect(hit.locator('.premium')).toHaveText('Premium')
+  await expect(page.locator('.hits .premium')).toHaveCount(1)
+
+  await page.getByRole('link', { name: RECENT.address }).click()
+  await expect(page.getByRole('heading', { name: RECENT.address })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.eyebrow .premium')).toHaveText('Premium')
+})
+
+test('a free member sees no premium tab on what everyone gets', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('recent-premium-free'))
+  await searchTarget(page, { wide: true })
+
+  await expect(page.locator('.hit-address').first()).toBeVisible()
+  await expect(page.locator('.premium')).toHaveCount(0)
+})

@@ -3,7 +3,7 @@ import { api } from '../api'
 import { buildings, detail, manifest, type Building, type Record_ } from '../data/duck'
 import { formatDate, SOURCE, WITHDRAWN, type Source } from '../data/sources'
 import type { DetailRef } from '../routes'
-import { area, Badge, mapsHref } from '../search/Results'
+import { area, Badge, mapsHref, Premium } from '../search/Results'
 import { field, formatValue } from './fields'
 
 type Saved = { id: string; numeroDpe: string; source?: string }
@@ -170,7 +170,10 @@ export function Detail({ record, paid }: { record: DetailRef; paid: boolean }) {
   return (
     <section>
       {back}
-      <p className="eyebrow">{src.label}</p>
+      <p className="eyebrow">
+        {src.label}
+        {rec.recent ? <Premium /> : null}
+      </p>
       <h1>{address}</h1>
       <p className="lede">{record.key}</p>
       {withdrawn ? (
