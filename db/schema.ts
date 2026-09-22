@@ -142,6 +142,55 @@ export const savedSearch = sqliteTable('saved_search', {
   check('saved_search_visibility_known', sql`${t.visibility} in ('private', 'unlisted')`),
 ])
 
+/**
+ * Stripe's subscription statuses, as its API spells them, plus `pending`: a
+ * checkout opened and not yet paid. See ADR-0047.
+ */
+export const SUBSCRIPTION_STATUSES = [
+  'pending',
+  'incomplete',
+  'incomplete_expired',
+  'trialing',
+  'active',
+  'past_due',
+  'canceled',
+  'unpaid',
+  'paused',
+] as const
+
+/**
+ * One checkout the owner opened, and the Stripe subscription it became.
+ * `id` is the Checkout Session id (`cs_…`); `subscriptionId` arrives with the
+ * webhook once it is paid.
+ *
+ * Only the owner's checkout inserts a row; the webhook only UPDATEs one it
+ * finds by id, so no event, however well signed, can attach a subscription to
+ * an account that did not start it. What entitles is `status` together with
+ * `paidUntil` (unix seconds, end of the current period): see ADR-0047.
+ *
+ * TRAP: deleting the user cascades this row but cancels nothing at Stripe,
+ * which would go on charging. A delete-account route must cancel first.
+ */
+export const subscription = sqliteTable('subscription', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  subscriptionId: text('subscription_id'),
+  customerId: text('customer_id'),
+  status: text('status').notNull().default('pending'),
+  paidUntil: integer('paid_until'),
+  cancelAtPeriodEnd: integer('cancel_at_period_end', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at').notNull().default(now),
+  updatedAt: integer('updated_at').notNull().default(now),
+}, (t) => [
+  index('subscription_user_idx').on(t.userId),
+  uniqueIndex('subscription_subscription_id_unique').on(t.subscriptionId),
+  check(
+    'subscription_status_known',
+    sql`${t.status} in ('pending', 'incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused')`,
+  ),
+])
+
 export type User = typeof user.$inferSelect
 export type SavedBuilding = typeof savedBuilding.$inferSelect
 export type SavedSearch = typeof savedSearch.$inferSelect
+export type Subscription = typeof subscription.$inferSelect

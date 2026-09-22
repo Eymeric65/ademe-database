@@ -27,6 +27,12 @@ export default defineWorkersConfig({
             AUTH_TEST_CREDENTIALS: '1',
             BETTER_AUTH_SECRET: 'test-secret-not-used-anywhere-real',
             BETTER_AUTH_URL: 'http://x',
+            // Stripe is answered by fetchMock in test/db/billing.test.ts,
+            // with net connect disabled, so a missing intercept fails loudly
+            // rather than reaching the real API.
+            STRIPE_SECRET_KEY: 'sk_test_not_a_real_key',
+            STRIPE_WEBHOOK_SECRET: 'whsec_test_not_a_real_secret',
+            STRIPE_PRICE_ID: 'price_test',
           },
         },
       },

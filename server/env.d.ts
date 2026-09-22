@@ -27,4 +27,17 @@ interface Env {
    * Google sign-in through it. Preview only, NEVER production -- see ADR-0036.
    */
   OAUTH_PROXY_URL?: string
+
+  /**
+   * Stripe, for the paid plan. The key and the webhook secret are secrets
+   * (`wrangler secret put`, test-mode values under --env preview); the price is
+   * a var. Any of them missing and the billing routes answer 503: no key, no
+   * checkout. See ADR-0047.
+   */
+  STRIPE_SECRET_KEY?: string
+  STRIPE_WEBHOOK_SECRET?: string
+  STRIPE_PRICE_ID?: string
+
+  /** '1' refuses any key that is not a test-mode key. Preview only -- see server/stripe.ts. */
+  STRIPE_TEST_MODE_ONLY?: string
 }

@@ -44,5 +44,13 @@ export const MIGRATIONS: readonly Migration[] = [
     "statements": [
       "ALTER TABLE `user` ADD `plan` text DEFAULT 'free' NOT NULL CHECK (`plan` in ('free', 'paid'));"
     ]
+  },
+  {
+    "name": "0004_subscription",
+    "statements": [
+      "CREATE TABLE `subscription` (\n\t`id` text PRIMARY KEY NOT NULL,\n\t`user_id` text NOT NULL,\n\t`subscription_id` text,\n\t`customer_id` text,\n\t`status` text DEFAULT 'pending' NOT NULL,\n\t`paid_until` integer,\n\t`cancel_at_period_end` integer DEFAULT false NOT NULL,\n\t`created_at` integer DEFAULT (unixepoch()) NOT NULL,\n\t`updated_at` integer DEFAULT (unixepoch()) NOT NULL,\n\tFOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,\n\tCONSTRAINT \"subscription_status_known\" CHECK(\"subscription\".\"status\" in ('pending', 'incomplete', 'incomplete_expired', 'trialing', 'active', 'past_due', 'canceled', 'unpaid', 'paused'))\n);",
+      "CREATE INDEX `subscription_user_idx` ON `subscription` (`user_id`);",
+      "CREATE UNIQUE INDEX `subscription_subscription_id_unique` ON `subscription` (`subscription_id`);"
+    ]
   }
 ] as const

@@ -16,18 +16,33 @@
  */
 
 import {
+  applyCheckout,
+  applySubscription,
   authFor,
   callerFrom,
   deleteSavedBuilding,
   deleteSavedSearch,
+  ENTITLING,
   ensureMigrated,
+  GRACE_SECONDS,
+  isKnownBilling,
   listSavedBuildings,
   listSavedSearches,
   planOf,
+  recordCheckout,
   saveBuilding,
   saveSearch,
+  subscriptionOf,
   type Caller,
 } from './db'
+import {
+  createCheckoutSession,
+  readSubscription,
+  StripeError,
+  stripeKey,
+  subscriptionOfCheckout,
+  verifySignature,
+} from './stripe'
 import { SAVED_SOURCES } from '../db/schema'
 
 /**
@@ -86,7 +101,84 @@ export const ROUTES: Route[] = [
       // here would mean the two disagreed. Fail closed rather than guess.
       if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
       const { id, name, email } = session.user
-      return json({ id, name, email, plan: await planOf(env, caller) })
+      return json({ id, name, email, plan: await planOf(env, caller), ...(await termsOf(env, caller)) })
+    },
+  },
+
+  // --- billing ------------------------------------------------------------
+  // The paid plan, bought through Stripe's hosted Checkout. Cancelling and
+  // changing the card happen in Stripe's hosted portal, not here. See ADR-0047.
+  {
+    method: 'POST',
+    path: '/api/billing/checkout',
+    scope: 'self',
+    handle: async ({ request, env, caller }) => {
+      const key = stripeKey(env)
+      if (!key || !env.STRIPE_PRICE_ID) return json({ error: 'billing unavailable' }, 503)
+      if ((await planOf(env, caller)) === 'paid') return json({ error: 'already paid' }, 409)
+      // A subscription still alive at Stripe would go on charging beside a new
+      // one, even while it reads as free here (an unpaid renewal).
+      const current = await subscriptionOf(env, caller)
+      if (current && LIVE.includes(current.status)) return json({ error: 'already subscribed' }, 409)
+      const origin = new URL(request.url).origin
+      const session = await authFor(env, origin).api.getSession({ headers: request.headers })
+      if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
+
+      return upstream(async () => {
+        const checkout = await createCheckoutSession(key, {
+          priceId: env.STRIPE_PRICE_ID as string,
+          userId: caller.sub,
+          email: session.user.email,
+          customerId: current?.customerId ?? null,
+          origin,
+        })
+        await recordCheckout(env, caller, { id: checkout.id })
+        return json({ url: checkout.url })
+      })
+    },
+  },
+  // No session: Stripe calls this. The signature is the gate, and the body is
+  // only a poke -- nothing in it is written, only its type and an id are read,
+  // and the state is fetched back from Stripe with the secret key. An id no
+  // owner's checkout created changes nothing, because nothing here inserts.
+  {
+    method: 'POST',
+    path: '/api/billing/webhook',
+    scope: 'public',
+    handle: async ({ request, env }) => {
+      const key = stripeKey(env)
+      if (!key || !env.STRIPE_WEBHOOK_SECRET) return json({ error: 'billing unavailable' }, 503)
+      const raw = await request.text()
+      const signed = await verifySignature({
+        secret: env.STRIPE_WEBHOOK_SECRET,
+        header: request.headers.get('stripe-signature'),
+        body: raw,
+        now: Math.floor(Date.now() / 1000),
+      })
+      if (!signed) return json({ error: 'bad signature' }, 400)
+
+      let type = ''
+      let id = ''
+      try {
+        const event = JSON.parse(raw) as { type?: unknown; data?: { object?: { id?: unknown } } }
+        type = str(event.type)
+        id = str(event.data?.object?.id)
+      } catch {
+        // Signed but unreadable: nothing to act on, and redelivery will not fix it.
+      }
+      return upstream(async () => {
+        if (type === 'checkout.session.completed' && id && (await isKnownBilling(env, { checkoutId: id }))) {
+          const sub = await subscriptionOfCheckout(key, id)
+          if (sub) await applyCheckout(env, id, await readSubscription(key, sub))
+        } else if (
+          type.startsWith('customer.subscription.') &&
+          id &&
+          (await isKnownBilling(env, { subscriptionId: id }))
+        ) {
+          await applySubscription(env, await readSubscription(key, id))
+        }
+        return new Response(null, { status: 204 })
+      })
     },
   },
 
@@ -205,6 +297,37 @@ export const ROUTES: Route[] = [
     handle: ({ request, env }) => serveObject(request, env, { immutable: false, noStore: true }),
   },
 ]
+
+/** Statuses in which Stripe will still charge, paid for or not. */
+const LIVE: string[] = ['trialing', 'active', 'past_due', 'unpaid', 'paused']
+
+/**
+ * When the caller's subscription renews or ends, as ISO dates, for /api/me.
+ * Only a date that still entitles is shown; a lapsed one is just free.
+ */
+async function termsOf(env: Env, caller: Caller): Promise<{ renewsOn: string | null; endsOn: string | null }> {
+  const sub = await subscriptionOf(env, caller)
+  const now = Math.floor(Date.now() / 1000)
+  if (!sub || !ENTITLING.includes(sub.status as never) || sub.paidUntil == null || sub.paidUntil + GRACE_SECONDS <= now) {
+    return { renewsOn: null, endsOn: null }
+  }
+  const day = new Date(sub.paidUntil * 1000).toISOString().slice(0, 10)
+  return sub.cancelAtPeriodEnd ? { renewsOn: null, endsOn: day } : { renewsOn: day, endsOn: null }
+}
+
+/**
+ * Run a handler that talks to Stripe. Its failure is a 502, never a crash --
+ * and on the webhook a 5xx is what makes Stripe deliver again.
+ */
+async function upstream(run: () => Promise<Response>): Promise<Response> {
+  try {
+    return await run()
+  } catch (e) {
+    if (!(e instanceof StripeError)) throw e
+    console.error('stripe', e.message)
+    return json({ error: 'billing provider unavailable' }, 502)
+  }
+}
 
 /** Bodies are validated by hand; a schema library is not worth a dependency here. */
 async function readJson(request: Request): Promise<Record<string, unknown>> {
