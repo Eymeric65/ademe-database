@@ -18,6 +18,7 @@ import { ROUTES } from '../../server/index'
 import {
   event,
   postWebhook,
+  STRIPE_ORIGIN,
   recentStatus,
   setPlan,
   signUp,
@@ -251,5 +252,32 @@ describe('two users and one subscription', () => {
       .bind('cs_of_b')
       .first()
     expect(row).toEqual({ status: 'pending', email: 'sub-b@example.test' })
+  })
+
+  it('never opens a portal on A\'s customer for B, to manage or to cancel', async () => {
+    const { a, b } = await payingA()
+    // One portal session is on offer, and every form Stripe is asked with is kept.
+    const asked: string[] = []
+    fetchMock
+      .get(STRIPE_ORIGIN)
+      .intercept({ method: 'POST', path: '/v1/billing_portal/sessions' })
+      .reply(200, (opts) => {
+        asked.push(String(opts.body))
+        return JSON.stringify({ id: 'bps_a', url: 'https://billing.stripe.invalid/session/bps_a' })
+      })
+
+    for (const body of [{}, { cancel: true }]) {
+      const res = await post(b, '/api/billing/portal', body)
+      expect(res.status).toBe(404)
+      await res.arrayBuffer()
+    }
+    expect(asked.filter((form) => form.includes('cus_of_sub_of_a'))).toEqual([])
+
+    // The stub was live all along: A's own call is the one that reaches it.
+    const own = await post(a, '/api/billing/portal', {})
+    expect(own.status).toBe(200)
+    await own.arrayBuffer()
+    expect(asked).toHaveLength(1)
+    expect(new URLSearchParams(asked[0]).get('customer')).toBe('cus_of_sub_of_a')
   })
 })

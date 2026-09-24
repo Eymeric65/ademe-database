@@ -15,8 +15,6 @@ export type Account = {
   /** ISO dates, set only while the subscription entitles. */
   renewsOn: string | null
   endsOn: string | null
-  /** Stripe's hosted portal, where a member cancels or changes their card. */
-  manageUrl: string | null
 }
 
 /**

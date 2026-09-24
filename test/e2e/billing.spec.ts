@@ -12,6 +12,7 @@ import { makePaid, signUpViaApi, subscribe, uniqueEmail } from './helpers'
  */
 
 const CHECKOUT = 'https://checkout.stripe.test/c/pay/cs_e2e'
+const PORTAL = 'https://billing.stripe.test/p/session/bps_e2e'
 
 /** "2026-10-22" as the page writes it: « 22 octobre 2026 ». */
 function frenchDay(offsetDays: number): string {
@@ -31,6 +32,19 @@ async function stubCheckout(page: Page): Promise<string[]> {
   return calls
 }
 
+/** Answer the portal route in the browser; returns the bodies it was posted. */
+async function stubPortal(page: Page): Promise<unknown[]> {
+  const calls: unknown[] = []
+  await page.route('**/api/billing/portal', async (route) => {
+    calls.push(route.request().postDataJSON())
+    await route.fulfill({ json: { url: PORTAL } })
+  })
+  await page.route('https://billing.stripe.test/**', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<h1>Stripe portal (stub)</h1>' }),
+  )
+  return calls
+}
+
 test('a free member is offered the plan, and the button opens Stripe Checkout', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('billing-free'))
   const calls = await stubCheckout(page)
@@ -39,7 +53,8 @@ test('a free member is offered the plan, and the button opens Stripe Checkout', 
   await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Abonnement' }).click()
   await expect(page.getByRole('heading', { name: 'Abonnement' })).toBeVisible()
   await expect(page.getByText('5 € par mois, sans engagement')).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Gérer mon abonnement' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Résilier mon abonnement' })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'S’abonner — 5 €/mois' }).click()
   await expect(page).toHaveURL(CHECKOUT)
@@ -74,20 +89,72 @@ test('back from a cancelled checkout, nothing was charged', async ({ page }) => 
   await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toBeVisible()
 })
 
-test('a subscriber cancelled at period end sees when it ends, and manages it at Stripe', async ({ page }) => {
+test('a subscriber cancelled at period end sees when it ends, and can still reach their invoices', async ({ page }) => {
   const email = uniqueEmail('billing-leaving')
   await signUpViaApi(page, email)
   subscribe(email, { days: 12, cancelAtPeriodEnd: true })
+  const calls = await stubPortal(page)
   await page.goto('/#/abonnement')
 
   await expect(page.getByText('Votre abonnement est actif.')).toBeVisible()
   await expect(page.getByText(`Il se termine le ${frenchDay(12)} et ne sera pas renouvelé.`)).toBeVisible()
-  const manage = page.getByRole('link', { name: 'Gérer mon abonnement' })
-  await expect(manage).toHaveAttribute(
-    'href',
-    `https://billing.stripe.test/p/login/e2e?prefilled_email=${encodeURIComponent(email)}`,
-  )
+  // Already cancelled: nothing left to cancel.
+  await expect(page.getByRole('button', { name: 'Résilier mon abonnement' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Gérer ma carte et mes factures' }).click()
+  await expect(page).toHaveURL(PORTAL)
+  expect(calls).toEqual([{}])
+})
+
+test('a subscriber cancels through one « avant de partir » panel, never two', async ({ page }) => {
+  const email = uniqueEmail('billing-cancel')
+  await signUpViaApi(page, email)
+  subscribe(email, { days: 20 })
+  const calls = await stubPortal(page)
+  await page.goto('/#/abonnement')
+
+  await expect(page.getByText(`Prochain renouvellement le ${frenchDay(20)}.`)).toBeVisible()
+  const resilier = page.getByRole('button', { name: 'Résilier mon abonnement' })
+  await expect(resilier).toBeVisible()
+
+  // « Garder » closes the panel and asks nothing of anybody.
+  await resilier.click()
+  const panel = page.getByRole('dialog', { name: 'Avant de partir' })
+  await expect(panel).toBeVisible()
+  await expect(panel.getByRole('link', { name: 'eymeric.me' })).toHaveAttribute('href', 'https://eymeric.me')
+  await expect(panel.getByRole('button', { name: 'Continuer la résiliation' })).toBeVisible()
+  await panel.getByRole('button', { name: 'Garder mon abonnement' }).click()
+  await expect(panel).toHaveCount(0)
+  expect(calls).toEqual([])
+
+  // Escape closes it too.
+  await resilier.click()
+  await expect(panel).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+  expect(calls).toEqual([])
+
+  // « Continuer » is the one extra click: straight to Stripe's cancel page.
+  await resilier.click()
+  await panel.getByRole('button', { name: 'Continuer la résiliation' }).click()
+  await expect(page).toHaveURL(PORTAL)
+  expect(calls).toEqual([{ cancel: true }])
+})
+
+test('back from Stripe\'s cancel page, the page waits for the webhook and then says when it ends', async ({ page }) => {
+  const email = uniqueEmail('billing-resilie')
+  await signUpViaApi(page, email)
+  // No row yet: the webhook that says "cancelled at period end" has not landed.
+  await page.goto('/?abonnement=resilie')
+
+  await expect(page).toHaveURL(/\/#\/abonnement$/)
+  await expect(page.getByText('Résiliation enregistrée')).toBeVisible()
+
+  subscribe(email, { days: 9, cancelAtPeriodEnd: true })
+  await expect(page.getByText(`Il se termine le ${frenchDay(9)} et ne sera pas renouvelé.`)).toBeVisible({
+    timeout: 20_000,
+  })
 })
 
 test('an account given the plan by hand is told so, with nothing to manage', async ({ page }) => {
@@ -97,7 +164,8 @@ test('an account given the plan by hand is told so, with nothing to manage', asy
   await page.goto('/#/abonnement')
 
   await expect(page.getByText('Votre accès aux deux derniers mois est actif.')).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Gérer mon abonnement' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Résilier mon abonnement' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
 })
 
@@ -108,6 +176,6 @@ test('a subscription waiting on a failed renewal is sent to Stripe, not to a sec
   await page.goto('/#/abonnement')
 
   await expect(page.getByText('Le dernier paiement n’est pas passé.')).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Gérer mon abonnement' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
 })

@@ -157,6 +157,31 @@ export async function createCheckoutSession(
 }
 
 /**
+ * Open a Customer Portal session for one customer and return where to send it.
+ * It comes back to the host it was opened from, so a preview returns to the
+ * preview. With a subscription id it opens straight on Stripe's cancel page,
+ * whose own confirmation is the last click. See ADR-0048.
+ */
+export async function createPortalSession(
+  key: string,
+  input: { customerId: string; origin: string; cancelSubscriptionId?: string },
+): Promise<{ url: string }> {
+  const form = new URLSearchParams({
+    customer: input.customerId,
+    return_url: `${input.origin}/#/abonnement`,
+  })
+  if (input.cancelSubscriptionId) {
+    form.set('flow_data[type]', 'subscription_cancel')
+    form.set('flow_data[subscription_cancel][subscription]', input.cancelSubscriptionId)
+    form.set('flow_data[after_completion][type]', 'redirect')
+    form.set('flow_data[after_completion][redirect][return_url]', `${input.origin}/?abonnement=resilie`)
+  }
+  const session = await call<{ id: string; url?: string | null }>(key, 'POST', '/billing_portal/sessions', form)
+  if (!session.url) throw new StripeError(502, `portal session ${session.id} came back without a url`)
+  return { url: session.url }
+}
+
+/**
  * The subscription a checkout became, or null while it has not become one:
  * still open, expired, or not a subscription checkout at all.
  */

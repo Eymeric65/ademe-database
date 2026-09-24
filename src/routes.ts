@@ -51,8 +51,8 @@ export function detailHref({ source, key, dept }: DetailRef): string {
   return dept ? `#/${source}/${encodeURIComponent(dept)}/${k}` : `#/${source}/${k}`
 }
 
-/** How a member came back from Stripe Checkout, if they just did. */
-export type CheckoutReturn = 'merci' | 'annule' | null
+/** How a member came back from Stripe Checkout or its cancel page, if they just did. */
+export type CheckoutReturn = 'merci' | 'annule' | 'resilie' | null
 
 /**
  * Read and clear the query Stripe Checkout sends a member back with.
@@ -64,7 +64,7 @@ export type CheckoutReturn = 'merci' | 'annule' | null
  */
 export function takeCheckoutReturn(): CheckoutReturn {
   const value = new URLSearchParams(window.location.search).get('abonnement')
-  if (value !== 'merci' && value !== 'annule') return null
+  if (value !== 'merci' && value !== 'annule' && value !== 'resilie') return null
   window.history.replaceState(null, '', '/#/abonnement')
   return value
 }

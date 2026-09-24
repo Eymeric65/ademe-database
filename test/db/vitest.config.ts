@@ -33,7 +33,6 @@ export default defineWorkersConfig({
             STRIPE_SECRET_KEY: 'sk_test_not_a_real_key',
             STRIPE_WEBHOOK_SECRET: 'whsec_test_not_a_real_secret',
             STRIPE_PRICE_ID: 'price_test',
-            STRIPE_PORTAL_URL: 'https://billing.stripe.invalid/p/login/test',
           },
         },
       },
