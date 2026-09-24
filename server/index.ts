@@ -28,6 +28,7 @@ import {
   isKnownBilling,
   listSavedBuildings,
   listSavedSearches,
+  planAndSourceOf,
   planOf,
   recordCheckout,
   saveBuilding,
@@ -53,7 +54,8 @@ import { SAVED_SOURCES } from '../db/schema'
  * outright. See ADR-0012.
  *
  * `paid` is `signed-in` plus the caller's plan: data with no owner that only
- * paid accounts may read. The same test keeps it off /api. See ADR-0038.
+ * paid accounts -- any plan but `free` -- may read. The same test keeps it off
+ * /api. See ADR-0038 and ADR-0049.
  */
 type Scope = 'public' | 'signed-in' | 'paid' | 'self' | 'owner'
 
@@ -102,7 +104,8 @@ export const ROUTES: Route[] = [
       // here would mean the two disagreed. Fail closed rather than guess.
       if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
       const { id, name, email } = session.user
-      return json({ id, name, email, plan: await planOf(env, caller), ...(await termsOf(env, caller)) })
+      const { plan, source } = await planAndSourceOf(env, caller)
+      return json({ id, name, email, plan, planSource: source, ...(await termsOf(env, caller)) })
     },
   },
 
@@ -117,7 +120,7 @@ export const ROUTES: Route[] = [
     handle: async ({ request, env, caller }) => {
       const key = stripeKey(env)
       if (!key || !env.STRIPE_PRICE_ID) return json({ error: 'billing unavailable' }, 503)
-      if ((await planOf(env, caller)) === 'paid') return json({ error: 'already paid' }, 409)
+      if ((await planOf(env, caller)) !== 'free') return json({ error: 'already paid' }, 409)
       // A subscription still alive at Stripe would go on charging beside a new
       // one, even while it reads as free here (an unpaid renewal).
       const current = await subscriptionOf(env, caller)
@@ -652,7 +655,7 @@ async function dispatch(request: Request, env: Env, url: URL): Promise<Response>
   }
   if (!matched) return json({ error: 'not found' }, 404)
   // see ADR-0038
-  if (matched.route.scope === 'paid' && (await planOf(env, caller)) !== 'paid') {
+  if (matched.route.scope === 'paid' && (await planOf(env, caller)) === 'free') {
     return json({ error: 'forbidden' }, 403)
   }
 

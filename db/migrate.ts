@@ -27,15 +27,16 @@ export async function migrate(db: D1Database): Promise<string[]> {
   for (const migration of MIGRATIONS) {
     if (done.has(migration.name)) continue
     // D1 takes one statement per call, which is why bundle-migrations.ts splits
-    // them. Recording the name last means a half-applied migration is retried
-    // rather than skipped.
-    for (const statement of migration.statements) {
-      await db.prepare(statement).run()
-    }
-    await db
-      .prepare('INSERT INTO _migration (name, applied_at) VALUES (?, ?)')
-      .bind(migration.name, Math.floor(Date.now() / 1000))
-      .run()
+    // them. TRAP: they go in ONE batch with the ledger row, because a batch is
+    // a transaction. Run one by one, a migration that failed on its third
+    // statement kept its first, and the retry died on "duplicate column" for
+    // ever. See ADR-0049.
+    await db.batch([
+      ...migration.statements.map((statement) => db.prepare(statement)),
+      db
+        .prepare('INSERT INTO _migration (name, applied_at) VALUES (?, ?)')
+        .bind(migration.name, Math.floor(Date.now() / 1000)),
+    ])
     applied.push(migration.name)
   }
   return applied

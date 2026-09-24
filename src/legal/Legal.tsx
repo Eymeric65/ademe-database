@@ -31,7 +31,7 @@ export function Cgv() {
     <article className="legal">
       <h1>Conditions générales de vente</h1>
       <p className="lede">
-        Les présentes conditions régissent l’abonnement payant au service {SITE}, édité par{' '}
+        Les présentes conditions régissent l’abonnement au plan Découverte du service {SITE}, édité par{' '}
         {PUBLISHER.name}.
       </p>
 
@@ -39,8 +39,9 @@ export function Cgv() {
       <p>
         {SITE} permet de rechercher et de consulter les diagnostics de performance énergétique (DPE)
         publiés par l’ADEME en données ouvertes. Un compte gratuit donne accès à la recherche dans
-        l’historique des diagnostics. L’abonnement donne en outre accès aux diagnostics publiés au cours
-        des deux derniers mois, dans les résultats, sur la carte et en détail.
+        l’historique des diagnostics. L’abonnement au plan Découverte donne en outre accès aux
+        diagnostics publiés au cours des deux derniers mois, dans les résultats, sur la carte et en
+        détail.
       </p>
       <p>
         Les diagnostics sont reproduits tels que l’ADEME les publie. {SITE} ne les établit pas, ne les

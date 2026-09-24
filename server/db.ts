@@ -46,7 +46,11 @@ function open(env: { DB: D1Database }) {
 
 // --- plans -----------------------------------------------------------------
 
-export type Plan = 'free' | 'paid'
+/** Every plan but `free` reads the paid tree. See ADR-0049. */
+export type Plan = 'free' | 'decouverte'
+
+/** Where a plan other than free comes from: set by hand for life, or a Stripe subscription. */
+export type PlanSource = 'lifetime' | 'stripe' | null
 
 /**
  * How long past the end of a period a subscription still reads. Stripe rolls
@@ -63,7 +67,7 @@ export const ENTITLING: readonly (typeof s.SUBSCRIPTION_STATUSES)[number][] = ['
  * The caller's plan, read fresh on every call so a downgrade takes effect on
  * the next request rather than when a session expires.
  *
- * Paid is exactly `plan = 'paid'` (an operator's comp, ADR-0038) or one of the
+ * Paid is exactly `plan = 'decouverte'` (an operator's comp, ADR-0038) or one of the
  * caller's subscriptions in an entitling status with its period not yet over
  * (ADR-0047). The period is checked as well as the status so that webhooks
  * that stop arriving cannot keep an account paid for ever. No row, an empty
@@ -75,6 +79,15 @@ export async function planOf(
   caller: Caller,
   now = Math.floor(Date.now() / 1000),
 ): Promise<Plan> {
+  return (await planAndSourceOf(env, caller, now)).plan
+}
+
+/** `planOf`, and where the plan comes from. A hand-set plan wins over a subscription. */
+export async function planAndSourceOf(
+  env: { DB: D1Database },
+  caller: Caller,
+  now = Math.floor(Date.now() / 1000),
+): Promise<{ plan: Plan; source: PlanSource }> {
   const rows = await open(env)
     .select({ plan: s.user.plan, paidUntil: max(s.subscription.paidUntil) })
     .from(s.user)
@@ -87,8 +100,11 @@ export async function planOf(
     .limit(1)
     .all()
   const row = rows[0]
-  if (row?.plan === 'paid') return 'paid'
-  return row?.paidUntil != null && row.paidUntil + GRACE_SECONDS > now ? 'paid' : 'free'
+  if (row?.plan === 'decouverte') return { plan: 'decouverte', source: 'lifetime' }
+  // The only plan Stripe sells today: a subscription carries no plan id yet. See ADR-0049.
+  return row?.paidUntil != null && row.paidUntil + GRACE_SECONDS > now
+    ? { plan: 'decouverte', source: 'stripe' }
+    : { plan: 'free', source: null }
 }
 
 // --- subscriptions ---------------------------------------------------------

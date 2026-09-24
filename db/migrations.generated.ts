@@ -52,5 +52,14 @@ export const MIGRATIONS: readonly Migration[] = [
       "CREATE INDEX `subscription_user_idx` ON `subscription` (`user_id`);",
       "CREATE UNIQUE INDEX `subscription_subscription_id_unique` ON `subscription` (`subscription_id`);"
     ]
+  },
+  {
+    "name": "0005_user_plan_decouverte",
+    "statements": [
+      "ALTER TABLE `user` ADD `plan_next` text DEFAULT 'free' NOT NULL CHECK (`plan_next` in ('free', 'decouverte'));",
+      "UPDATE `user` SET `plan_next` = 'decouverte' WHERE `plan` = 'paid';",
+      "ALTER TABLE `user` DROP COLUMN `plan`;",
+      "ALTER TABLE `user` RENAME COLUMN `plan_next` TO `plan`;"
+    ]
   }
 ] as const

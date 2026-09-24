@@ -106,7 +106,7 @@ describe('the paid tree', () => {
 
   it('serves a paid account by ranges, and never lets the browser keep it', async () => {
     const cookie = await signUp('paid@example.test')
-    await setPlan('paid@example.test', 'paid')
+    await setPlan('paid@example.test', 'decouverte')
 
     const get = await SELF.fetch(PROBE, { headers: { cookie, range: 'bytes=0-99' } })
     expect(get.status).toBe(206)
@@ -125,7 +125,7 @@ describe('the paid tree', () => {
 
   it('refuses the next request once the account goes back to free', async () => {
     const cookie = await signUp('lapsed@example.test')
-    await setPlan('lapsed@example.test', 'paid')
+    await setPlan('lapsed@example.test', 'decouverte')
     const paid = await SELF.fetch(PROBE, { headers: { cookie } })
     expect(paid.status).toBe(200)
     expect((await paid.arrayBuffer()).byteLength).toBe(SIZE)
