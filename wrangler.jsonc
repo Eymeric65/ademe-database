@@ -48,11 +48,11 @@
     // Better Auth builds its OAuth redirect from this, so it must be the host
     // Google was told about. Previews leave it unset and fall back to the
     // request's own origin -- see authFor() in server/db.ts.
-    "BETTER_AUTH_URL": "https://recherche-maison.com",
+    "BETTER_AUTH_URL": "https://recherche-maison.com"
 
-    // The live €5/month price. The key and webhook secret are secrets, and the
-    // billing routes answer 503 until they and this are set. See ADR-0047.
-    "STRIPE_PRICE_ID": ""
+    // TRAP: no STRIPE_PRICE_ID here. Production's is a secret; a var of that
+    // name makes `wrangler secret put` refuse and is reset by every deploy.
+    // See ADR-0050.
   },
 
   "env": {

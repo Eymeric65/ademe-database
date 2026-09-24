@@ -3,12 +3,12 @@ status: accepted
 date: 2026-09-22
 area: identity
 supersedes:
-superseded-by: 0048 (in part: how the UI reaches the portal)
+superseded-by: 0048 (in part: how the UI reaches the portal), 0050 (in part: where production keeps the price id)
 ---
 
 # ADR-0047 — The paid plan is bought through Stripe Checkout, and the webhook re-fetches rather than trusts
 
-**Status:** accepted; the portal link is superseded by [ADR-0048](0048-the-portal-is-opened-by-a-session-route-behind-one-panel.md) · **Decided:** 2026-09-22 · **Area:** identity
+**Status:** accepted; the portal link is superseded by [ADR-0048](0048-the-portal-is-opened-by-a-session-route-behind-one-panel.md), the price var by [ADR-0050](0050-the-live-price-id-is-a-secret-so-going-live-needs-no-promotion.md) · **Decided:** 2026-09-22 · **Area:** identity
 
 ## Context and Problem Statement
 
