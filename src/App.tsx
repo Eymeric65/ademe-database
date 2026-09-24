@@ -199,6 +199,11 @@ export default function App() {
           {loading ? null : account ? (
             <>
               <span className="who">{account.email}</span>
+              {account.plan === 'paid' ? (
+                <span className="premium-star" role="img" aria-label="Membre Premium" title="Membre Premium">
+                  ★
+                </span>
+              ) : null}
               <button type="button" className="link" onClick={() => void signOut()}>
                 Se déconnecter
               </button>

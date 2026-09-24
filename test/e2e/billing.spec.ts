@@ -185,3 +185,15 @@ test('a subscription waiting on a failed renewal is sent to Stripe, not to a sec
   await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
 })
+
+test('a paid member wears the premium star in the header, a free one does not', async ({ page }) => {
+  const email = uniqueEmail('billing-star')
+  await signUpViaApi(page, email)
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Se déconnecter' })).toBeVisible()
+  await expect(page.locator('.account .premium-star')).toHaveCount(0)
+
+  await makePaid(page, email)
+  await page.goto('/')
+  await expect(page.locator('.account').getByRole('img', { name: 'Membre Premium' })).toBeVisible()
+})
