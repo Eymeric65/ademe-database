@@ -36,6 +36,13 @@
       "when": 1790102429678,
       "tag": "0004_subscription",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1790267148602,
+      "tag": "0005_user_plan_decouverte",
+      "breakpoints": true
     }
   ]
 }

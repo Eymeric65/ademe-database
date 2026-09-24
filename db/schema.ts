@@ -49,7 +49,7 @@ export const user = sqliteTable('user', {
   plan: text('plan').notNull().default('free'),
 }, (t) => [
   uniqueIndex('user_email_unique').on(t.email),
-  check('user_plan_known', sql`${t.plan} in ('free', 'paid')`),
+  check('user_plan_known', sql`${t.plan} in ('free', 'decouverte')`),
 ])
 
 export const session = sqliteTable('session', {

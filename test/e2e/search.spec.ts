@@ -430,7 +430,7 @@ test('a free member is told how many newer certificates match, and shown none', 
   await searchTarget(page, { wide: true })
 
   await expect(page.locator('.recent-locked')).toContainText(
-    '1 certificat plus récent — devenez membre payant pour y accéder',
+    '1 certificat plus récent — passez au plan Découverte pour y accéder',
   )
   await expect(page.locator('.recent-locked-note a')).toHaveAttribute('href', '#/abonnement')
   await expect(page.locator('.map-recent-note')).toHaveText('1 certificat plus récent non affiché sur la carte')
@@ -445,7 +445,7 @@ test('a free member following a link to a recent certificate is told why it is n
 
   await expect(page.getByText('Introuvable dans logement existant.')).toBeVisible({ timeout: 30_000 })
   await expect(
-    page.getByText('Les certificats de moins de deux mois sont réservés aux membres payants.'),
+    page.getByText('Les certificats de moins de deux mois sont réservés au plan Découverte.'),
   ).toBeVisible()
 })
 

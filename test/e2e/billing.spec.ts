@@ -20,6 +20,29 @@ function frenchDay(offsetDays: number): string {
   return new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(d)
 }
 
+const CHECKOUT_BUTTON = 'Passer à Découverte — 5 €/mois'
+
+/**
+ * Both plan cards, whatever the state -- the advantages used to vanish once
+ * somebody paid -- and exactly one marked as theirs, or none when signed out.
+ */
+async function expectPlans(page: Page, current: 'Gratuit' | 'Découverte' | null): Promise<void> {
+  const free = page.getByRole('article', { name: 'Gratuit' })
+  const decouverte = page.getByRole('article', { name: 'Découverte' })
+  await expect(free).toBeVisible()
+  await expect(free).toContainText('0 €')
+  await expect(free).toContainText('Recherche dans tous les DPE publiés')
+  await expect(decouverte).toBeVisible()
+  await expect(decouverte).toContainText('5 €/mois')
+  await expect(decouverte).toContainText('Les deux derniers mois disponibles à la recherche')
+  // The cards inform; every button is in the status line above them.
+  await expect(free.getByRole('button')).toHaveCount(0)
+  await expect(decouverte.getByRole('button')).toHaveCount(0)
+  for (const [name, card] of [['Gratuit', free], ['Découverte', decouverte]] as const) {
+    await expect(card.getByText('Votre plan', { exact: true })).toHaveCount(name === current ? 1 : 0)
+  }
+}
+
 async function stubCheckout(page: Page): Promise<string[]> {
   const calls: string[] = []
   await page.route('**/api/billing/checkout', async (route) => {
@@ -52,26 +75,28 @@ test('a free member is offered the plan, and the button opens Stripe Checkout', 
 
   await page.getByRole('navigation', { name: 'Principal' }).getByRole('link', { name: 'Abonnement' }).click()
   await expect(page.getByRole('heading', { name: 'Abonnement' })).toBeVisible()
-  await expect(page.getByText('5 € par mois, sans engagement')).toBeVisible()
+  await expect(page.getByText('Vous êtes actuellement sur le plan Gratuit.')).toBeVisible()
+  await expectPlans(page, 'Gratuit')
+  await expect(page.getByText('Plan à vie')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Résilier mon abonnement' })).toHaveCount(0)
 
-  await page.getByRole('button', { name: 'S’abonner — 5 €/mois' }).click()
+  await page.getByRole('button', { name: CHECKOUT_BUTTON }).click()
   await expect(page).toHaveURL(CHECKOUT)
   expect(calls).toEqual(['POST'])
 })
 
 test('the offer links the CGV the checkout asks to accept', async ({ page }) => {
   await page.goto('/#/abonnement')
-  await expect(page.getByText('5 € par mois, sans engagement')).toBeVisible()
+  await expect(page.getByRole('article', { name: 'Découverte' })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Conditions générales de vente' })).toHaveAttribute('href', '/cgv')
 })
 
 test('somebody signed out is asked to sign in first', async ({ page }) => {
   await page.goto('/#/abonnement')
-  await expect(page.getByText('5 € par mois, sans engagement')).toBeVisible()
+  await expectPlans(page, null)
   await expect(page.getByRole('button', { name: 'Se connecter pour s’abonner' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: CHECKOUT_BUTTON })).toHaveCount(0)
 })
 
 test('back from a paid checkout, the page waits for the webhook and then says so', async ({ page }) => {
@@ -82,17 +107,20 @@ test('back from a paid checkout, the page waits for the webhook and then says so
   // The query is Stripe's; once read, the address is the page's own.
   await expect(page).toHaveURL(/\/#\/abonnement$/)
   await expect(page.getByText('Paiement reçu, activation en cours…')).toBeVisible()
+  await expectPlans(page, 'Gratuit')
 
   subscribe(email, { days: 30 })
-  await expect(page.getByText('Votre abonnement est actif.')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('Vous êtes actuellement sur le plan Découverte.')).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText(`Prochain renouvellement le ${frenchDay(30)}.`)).toBeVisible()
+  await expectPlans(page, 'Découverte')
 })
 
 test('back from a cancelled checkout, nothing was charged', async ({ page }) => {
   await signUpViaApi(page, uniqueEmail('billing-cancelled'))
   await page.goto('/?abonnement=annule')
   await expect(page.getByText('Paiement annulé : rien n’a été débité.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toBeVisible()
+  await expect(page.getByRole('button', { name: CHECKOUT_BUTTON })).toBeVisible()
+  await expectPlans(page, 'Gratuit')
 })
 
 test('a subscriber cancelled at period end sees when it ends, and can still reach their invoices', async ({ page }) => {
@@ -102,11 +130,14 @@ test('a subscriber cancelled at period end sees when it ends, and can still reac
   const calls = await stubPortal(page)
   await page.goto('/#/abonnement')
 
-  await expect(page.getByText('Votre abonnement est actif.')).toBeVisible()
+  await expect(page.getByText('Vous êtes actuellement sur le plan Découverte.')).toBeVisible()
   await expect(page.getByText(`Il se termine le ${frenchDay(12)} et ne sera pas renouvelé.`)).toBeVisible()
+  // What they pay for stays on screen once they pay.
+  await expectPlans(page, 'Découverte')
+  await expect(page.getByText('Plan à vie')).toHaveCount(0)
   // Already cancelled: nothing left to cancel.
   await expect(page.getByRole('button', { name: 'Résilier mon abonnement' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: CHECKOUT_BUTTON })).toHaveCount(0)
 
   await page.getByRole('button', { name: 'Gérer ma carte et mes factures' }).click()
   await expect(page).toHaveURL(PORTAL)
@@ -121,6 +152,8 @@ test('a subscriber cancels through one « avant de partir » panel, never two', 
   await page.goto('/#/abonnement')
 
   await expect(page.getByText(`Prochain renouvellement le ${frenchDay(20)}.`)).toBeVisible()
+  await expectPlans(page, 'Découverte')
+  await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toBeVisible()
   const resilier = page.getByRole('button', { name: 'Résilier mon abonnement' })
   await expect(resilier).toBeVisible()
 
@@ -169,10 +202,12 @@ test('an account given the plan by hand is told so, with nothing to manage', asy
   await makePaid(page, email)
   await page.goto('/#/abonnement')
 
-  await expect(page.getByText('Votre accès aux deux derniers mois est actif.')).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'Résilier mon abonnement' })).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
+  await expect(page.getByText('Vous êtes actuellement sur le plan Découverte.')).toBeVisible()
+  await expectPlans(page, 'Découverte')
+  await expect(page.getByRole('article', { name: 'Découverte' }).getByText('Plan à vie', { exact: true })).toBeVisible()
+  await expect(page.getByRole('article', { name: 'Gratuit' }).getByText('Plan à vie')).toHaveCount(0)
+  // Nothing to buy, renew or cancel: not one button on the page.
+  await expect(page.locator('.subscription').getByRole('button')).toHaveCount(0)
 })
 
 test('a subscription waiting on a failed renewal is sent to Stripe, not to a second checkout', async ({ page }) => {
@@ -182,8 +217,9 @@ test('a subscription waiting on a failed renewal is sent to Stripe, not to a sec
   await page.goto('/#/abonnement')
 
   await expect(page.getByText('Le dernier paiement n’est pas passé.')).toBeVisible()
+  await expectPlans(page, 'Gratuit')
   await expect(page.getByRole('button', { name: 'Gérer ma carte et mes factures' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'S’abonner — 5 €/mois' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: CHECKOUT_BUTTON })).toHaveCount(0)
 })
 
 test('a paid member wears the premium star in the header, a free one does not', async ({ page }) => {

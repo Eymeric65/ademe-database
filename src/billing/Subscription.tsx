@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError } from '../api'
 import type { Account } from '../auth'
 import type { CheckoutReturn } from '../routes'
+import { PLANS, planLabel } from './plans'
 
 /** How long the page waits for Stripe's webhook after a paid checkout. */
 const ACTIVATION_WAIT_MS = 30_000
@@ -22,10 +23,11 @@ function frenchDay(iso: string): string {
 }
 
 /**
- * The « Abonnement » page: what the paid plan gives, the button that opens
- * Stripe Checkout, and, for a member, where the subscription stands and the
- * buttons that open Stripe's portal. Payment, cancelling and the card all live
- * at Stripe; this page only sends people there. See ADR-0047 and ADR-0048.
+ * The « Abonnement » page: a status line saying which plan the member is on,
+ * where its subscription stands and the one or two buttons that act on it,
+ * then every plan side by side, the same for everyone. Payment, cancelling and
+ * the card all live at Stripe; this page only sends people there. See
+ * ADR-0047, ADR-0048 and ADR-0049.
  */
 export function Subscription({
   account,
@@ -43,7 +45,7 @@ export function Subscription({
   const [waitedOut, setWaitedOut] = useState(false)
   const [leaving, setLeaving] = useState(false)
 
-  const activating = returned === 'merci' && account != null && account.plan !== 'paid'
+  const activating = returned === 'merci' && account != null && account.plan === 'free'
   const cancelling = returned === 'resilie' && account != null && !account.endsOn
   const waiting = activating || cancelling
 
@@ -109,26 +111,34 @@ export function Subscription({
 
   const manage = (
     <>
-      <p className="actions">
-        <button type="button" className="signin" disabled={busy} onClick={() => void portal(false)}>
-          Gérer ma carte et mes factures
+      <button type="button" className="signin" disabled={busy} onClick={() => void portal(false)}>
+        Gérer ma carte et mes factures
+      </button>
+      {account?.endsOn ? null : (
+        <button type="button" className="signin" disabled={busy} onClick={() => setLeaving(true)}>
+          Résilier mon abonnement
         </button>
-        {account?.endsOn ? null : (
-          <button type="button" className="signin" disabled={busy} onClick={() => setLeaving(true)}>
-            Résilier mon abonnement
-          </button>
-        )}
-      </p>
-      {error ? <p className="error">{error}</p> : null}
-      {leaving ? (
-        <BeforeLeaving busy={busy} onContinue={() => void portal(true)} onKeep={() => setLeaving(false)} />
-      ) : null}
+      )}
     </>
   )
 
-  let status: ReactNode = null
+  const offer = account ? (
+    <button type="button" className="signin" disabled={busy} onClick={() => void checkout()}>
+      Passer à Découverte — 5 €/mois
+    </button>
+  ) : (
+    <button type="button" className="signin" onClick={onSignIn}>
+      Se connecter pour s’abonner
+    </button>
+  )
+
+  // What is happening to the plan, then the buttons that act on it. The cards
+  // below never change with the state; this is the only part that does.
+  let lines: ReactNode = null
+  let buttons: ReactNode = null
+  let terms = false
   if (cancelling) {
-    status = (
+    lines = (
       <p className="lede" role="status">
         {waitedOut
           ? 'Résiliation enregistrée chez Stripe, mais la mise à jour tarde. Rechargez cette page dans une minute.'
@@ -136,74 +146,99 @@ export function Subscription({
       </p>
     )
   } else if (account && (account.renewsOn || account.endsOn)) {
-    status = (
+    lines = (
       <>
         {returned === 'resilie' ? (
           <p className="lede" role="status">
             Résiliation enregistrée.
           </p>
         ) : null}
-        <p className="lede">Votre abonnement est actif.</p>
         <p className="lede">
           {account.renewsOn
             ? `Prochain renouvellement le ${frenchDay(account.renewsOn)}.`
             : `Il se termine le ${frenchDay(account.endsOn as string)} et ne sera pas renouvelé.`}
         </p>
-        {manage}
       </>
     )
-  } else if (account?.plan === 'paid') {
-    status = <p className="lede">Votre accès aux deux derniers mois est actif.</p>
+    buttons = manage
+  } else if (account?.planSource === 'lifetime') {
+    lines = <p className="lede">Accordé à vie : rien à payer ni à renouveler.</p>
   } else if (account?.subscriptionStatus && UNPAID[account.subscriptionStatus]) {
-    status = (
+    lines = (
       <>
         <p className="lede">{UNPAID[account.subscriptionStatus]}</p>
         <p className="lede">Mettez votre carte à jour chez Stripe pour retrouver l’accès aux deux derniers mois.</p>
-        {manage}
       </>
     )
+    buttons = manage
   } else if (activating) {
-    status = (
+    lines = (
       <p className="lede" role="status">
         {waitedOut
           ? 'Stripe a bien reçu votre paiement, mais l’activation tarde. Rechargez cette page dans une minute.'
           : 'Paiement reçu, activation en cours…'}
       </p>
     )
+  } else if (!account || account.plan === 'free') {
+    lines = (
+      <>
+        {returned === 'annule' ? <p className="lede">Paiement annulé : rien n’a été débité.</p> : null}
+        <p className="lede">Sans engagement, résiliable à tout moment. Paiement par carte, chez Stripe.</p>
+      </>
+    )
+    buttons = offer
+    terms = true
   }
 
   return (
     <section className="subscription">
       <h1>Abonnement</h1>
-      {status ?? (
-        <>
-          {returned === 'annule' ? <p className="lede">Paiement annulé : rien n’a été débité.</p> : null}
-          <div className="offer">
-            <p className="offer-price">5 € par mois, sans engagement</p>
-            <ul>
-              <li>Les diagnostics publiés au cours des deux derniers mois, dans les résultats, sur la carte et en détail.</li>
-              <li>La recherche dans tout le reste de l’historique reste gratuite.</li>
-              <li>Résiliable à tout moment : l’accès court jusqu’à la fin du mois payé.</li>
-              <li>Paiement par carte, sur la page sécurisée de Stripe.</li>
-            </ul>
-            <p className="actions">
-              {account ? (
-                <button type="button" className="signin" disabled={busy} onClick={() => void checkout()}>
-                  S’abonner — 5 €/mois
-                </button>
-              ) : (
-                <button type="button" className="signin" onClick={onSignIn}>
-                  Se connecter pour s’abonner
-                </button>
-              )}
-            </p>
-            {error ? <p className="error">{error}</p> : null}
-            <p className="offer-terms">
-              <a href="/cgv">Conditions générales de vente</a>
-            </p>
-          </div>
-        </>
-      )}
+      <div className="plan-status">
+        <p className="plan-now">
+          {account ? (
+            <>
+              Vous êtes actuellement sur le plan <strong>{planLabel(account.plan)}</strong>.
+            </>
+          ) : (
+            'Connectez-vous pour choisir votre plan.'
+          )}
+        </p>
+        {lines}
+        {buttons ? <p className="actions">{buttons}</p> : null}
+        {error ? <p className="error">{error}</p> : null}
+        {terms ? (
+          <p className="offer-terms">
+            <a href="/cgv">Conditions générales de vente</a>
+          </p>
+        ) : null}
+      </div>
+
+      <div className="plans">
+        {PLANS.map((plan) => {
+          const current = account?.plan === plan.id
+          return (
+            <article
+              key={plan.id}
+              className={current ? 'plan-card current' : 'plan-card'}
+              aria-labelledby={`plan-${plan.id}`}
+            >
+              {current ? <p className="plan-marker">Votre plan</p> : null}
+              <h2 id={`plan-${plan.id}`}>{plan.label}</h2>
+              {current && account?.planSource === 'lifetime' ? <p className="plan-tag">Plan à vie</p> : null}
+              <p className="plan-price">{plan.price}</p>
+              <ul>
+                {plan.perks.map((perk) => (
+                  <li key={perk}>{perk}</li>
+                ))}
+              </ul>
+            </article>
+          )
+        })}
+      </div>
+
+      {leaving ? (
+        <BeforeLeaving busy={busy} onContinue={() => void portal(true)} onKeep={() => setLeaving(false)} />
+      ) : null}
     </section>
   )
 }

@@ -69,10 +69,10 @@ describe('the plan', () => {
     expect(await planOf(await signUp('new@example.test'))).toBe('free')
   })
 
-  it('reports a paid account as paid', async () => {
+  it('reports a Découverte account as Découverte', async () => {
     const cookie = await signUp('member@example.test')
-    await setPlan('member@example.test', 'paid')
-    expect(await planOf(cookie)).toBe('paid')
+    await setPlan('member@example.test', 'decouverte')
+    expect(await planOf(cookie)).toBe('decouverte')
   })
 
   it('ignores a plan sent with the sign-up', async () => {
@@ -83,7 +83,7 @@ describe('the plan', () => {
         email: 'greedy@example.test',
         password: 'correct-horse-battery',
         name: 'greedy',
-        plan: 'paid',
+        plan: 'decouverte',
       }),
     })
     // Accepted, so the field was really offered to Better Auth and dropped.
@@ -98,7 +98,7 @@ describe('the plan', () => {
     const res = await SELF.fetch('http://x/api/auth/update-user', {
       method: 'POST',
       headers: { cookie, 'content-type': 'application/json', origin: 'http://x' },
-      body: JSON.stringify({ name: 'renamed', plan: 'paid' }),
+      body: JSON.stringify({ name: 'renamed', plan: 'decouverte' }),
     })
     expect(res.status).toBeLessThan(400)
     // The name landing proves the update ran; the plan staying put is the point.

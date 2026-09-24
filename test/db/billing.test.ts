@@ -188,7 +188,7 @@ describe('checkout', () => {
 
   it('refuses an account that is already paid', async () => {
     const cookie = await signUp('comped@example.test')
-    await setPlan('comped@example.test', 'paid')
+    await setPlan('comped@example.test', 'decouverte')
     expect((await post(cookie, '/api/billing/checkout')).status).toBe(409)
   })
 
@@ -218,7 +218,7 @@ describe('the webhook', () => {
       cancel_at_period_end: 0,
     })
     expect(await recentStatus(cookie)).toBe(200)
-    expect(await me(cookie)).toMatchObject({ plan: 'paid', renewsOn: day(end), endsOn: null })
+    expect(await me(cookie)).toMatchObject({ plan: 'decouverte', planSource: 'stripe', renewsOn: day(end), endsOn: null })
   })
 
   it('is harmless when delivered twice', async () => {
@@ -297,7 +297,7 @@ describe('what entitles', () => {
     stubSubscription('sub_7', { status: 'active', periodEnd: end, cancelAtPeriodEnd: true })
     expect((await postWebhook(event('customer.subscription.updated', { id: 'sub_7' }))).status).toBe(204)
     expect(await recentStatus(cookie)).toBe(200)
-    expect(await me(cookie)).toMatchObject({ plan: 'paid', renewsOn: null, endsOn: day(end) })
+    expect(await me(cookie)).toMatchObject({ plan: 'decouverte', planSource: 'stripe', renewsOn: null, endsOn: day(end) })
   })
 
   it('stops at once when Stripe deletes the subscription', async () => {
@@ -305,7 +305,7 @@ describe('what entitles', () => {
     stubSubscription('sub_8', { status: 'canceled', periodEnd: new Date(Date.now() + 20 * DAY) })
     expect((await postWebhook(event('customer.subscription.deleted', { id: 'sub_8' }))).status).toBe(204)
     expect(await recentStatus(cookie)).toBe(403)
-    expect(await me(cookie)).toMatchObject({ plan: 'free', renewsOn: null, endsOn: null })
+    expect(await me(cookie)).toMatchObject({ plan: 'free', planSource: null, renewsOn: null, endsOn: null })
   })
 
   it('does not read on an unpaid renewal', async () => {
@@ -328,8 +328,16 @@ describe('what entitles', () => {
 
   it('still honours a plan set by hand', async () => {
     const cookie = await signUp('manual@example.test')
-    await setPlan('manual@example.test', 'paid')
+    await setPlan('manual@example.test', 'decouverte')
     expect(await recentStatus(cookie)).toBe(200)
+    // Set by hand, so for life: the page shows no button to cancel it.
+    expect(await me(cookie)).toMatchObject({ plan: 'decouverte', planSource: 'lifetime' })
+  })
+
+  it('calls a hand-set plan lifetime even beside a live subscription', async () => {
+    const cookie = await paid('both@example.test', 'cs_b', 'sub_b')
+    await setPlan('both@example.test', 'decouverte')
+    expect(await me(cookie)).toMatchObject({ plan: 'decouverte', planSource: 'lifetime' })
   })
 })
 
@@ -343,7 +351,7 @@ describe('what /api/me says about billing', () => {
 
   it('gives a free member no status', async () => {
     const cookie = await signUp('never@example.test')
-    expect(await me(cookie)).toMatchObject({ plan: 'free', subscriptionStatus: null })
+    expect(await me(cookie)).toMatchObject({ plan: 'free', planSource: null, subscriptionStatus: null })
   })
 
   it('gives no status while a checkout is only opened', async () => {

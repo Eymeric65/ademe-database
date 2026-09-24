@@ -558,7 +558,7 @@ export function renderDepartementPage({
                 Ils sont calculés sur les diagnostics de logements existants publiés par l’ADEME,
                 repris certificat par certificat. Les données s’arrêtent au {cutoff} ; les
                 diagnostics des deux à trois derniers mois ne sont pas comptés ici, ils sont
-                réservés aux comptes payants (voir la présentation du site).
+                réservés au plan Découverte (voir la présentation du site).
               </p>
               <p className="note">
                 Un logement n’apparaît que si un diagnostic a été déposé. Le département est celui

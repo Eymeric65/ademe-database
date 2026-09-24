@@ -18,7 +18,7 @@ export async function signUpViaApi(page: Page, email: string): Promise<void> {
 }
 
 /**
- * Make an account paid the one way there is: an UPDATE on D1 (ADR-0038).
+ * Put an account on Découverte the one way there is: an UPDATE on D1 (ADR-0038).
  *
  * Against the preview D1 `wrangler dev --env preview` reads, locally -- or the
  * deployed preview's, remotely, when E2E_BASE_URL points at one. Reads the
@@ -31,10 +31,10 @@ export async function makePaid(page: Page, email: string): Promise<void> {
   execFileSync('npx', [
     'wrangler', 'd1', 'execute', 'ademe-app-preview', '--env', 'preview',
     process.env.E2E_BASE_URL ? '--remote' : '--local',
-    '--command', `UPDATE user SET plan = 'paid', updated_at = unixepoch() WHERE email = '${email}'`,
+    '--command', `UPDATE user SET plan = 'decouverte', updated_at = unixepoch() WHERE email = '${email}'`,
   ], { stdio: 'pipe' })
   const me = (await (await page.request.get('/api/me')).json()) as { plan?: string }
-  if (me.plan !== 'paid') throw new Error(`${email} is still ${me.plan} after the UPDATE`)
+  if (me.plan !== 'decouverte') throw new Error(`${email} is still ${me.plan} after the UPDATE`)
 }
 
 /**

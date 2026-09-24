@@ -186,7 +186,7 @@ describe('one paid account and one free', () => {
     await env.DATA.put('recent/v1/probe.bin', new Uint8Array(10))
     const a = await signUp('paid-a@example.test')
     const b = await signUp('free-b@example.test')
-    await setPlan('paid-a@example.test', 'paid')
+    await setPlan('paid-a@example.test', 'decouverte')
 
     // Every body read: an R2 stream left open fails isolated storage.
     const status = async (cookie: string) => {

@@ -94,8 +94,8 @@ export function Detail({ record, paid }: { record: DetailRef; paid: boolean }) {
         <p className="lede">Introuvable dans {src.label.toLowerCase()}.</p>
         {locked ? (
           <p className="hint">
-            Les {src.id === 'audit' ? 'audits' : 'certificats'} de moins de deux mois sont réservés aux{' '}
-            <a href="#/abonnement">membres payants</a>.
+            Les {src.id === 'audit' ? 'audits' : 'certificats'} de moins de deux mois sont réservés au{' '}
+            <a href="#/abonnement">plan Découverte</a>.
           </p>
         ) : null}
       </>

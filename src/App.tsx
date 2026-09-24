@@ -199,7 +199,7 @@ export default function App() {
           {loading ? null : account ? (
             <>
               <span className="who">{account.email}</span>
-              {account.plan === 'paid' ? (
+              {account.plan !== 'free' ? (
                 <span className="premium-star" role="img" aria-label="Membre Premium" title="Membre Premium">
                   ★
                 </span>
@@ -229,7 +229,7 @@ export default function App() {
             and the map as they were, without searching again. */}
         {!loading && account ? (
           <div hidden={route.name !== 'search'}>
-            <Search paid={account.plan === 'paid'} />
+            <Search paid={account.plan !== 'free'} />
           </div>
         ) : null}
         {loading ? null : route.name === 'presentation' ? (
@@ -252,7 +252,7 @@ export default function App() {
             <Detail
               key={`${route.source}/${route.dept ?? ''}/${route.key}`}
               record={{ source: route.source, key: route.key, dept: route.dept }}
-              paid={account.plan === 'paid'}
+              paid={account.plan !== 'free'}
             />
           ) : (
             <Gate
