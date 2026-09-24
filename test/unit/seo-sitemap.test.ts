@@ -168,10 +168,12 @@ describe('the présentation page', () => {
     expect(xml).toContain(`<loc>${ORIGIN}/presentation</loc>`)
   })
 
-  it('links the stylesheet the built app itself loads, and ships no script', () => {
+  it('links the stylesheet the built app itself loads, and ships no bundle', () => {
     const html = readFileSync(join(out, 'presentation.html'), 'utf8')
     expect(html).toContain(`href="${CSS_HREF}"`)
-    expect(html).not.toContain('<script')
+    // The masthead’s account corner, and nothing else.
+    expect(html.match(/<script/g)).toHaveLength(1)
+    expect(html).toContain('<script>')
     expect(html).toContain(`<link rel="canonical" href="${ORIGIN}/presentation"/>`)
     // The hero, and a section from the body: the real component, not a stub.
     expect(html).toContain('Le diagnostic montre le logement')
@@ -209,14 +211,15 @@ describe('the legal pages', () => {
     }
   })
 
-  it('render under the masthead, with the app stylesheet and no script', () => {
+  it('render under the masthead, with the app stylesheet and no bundle', () => {
     for (const { page, heading } of LEGAL) {
       const html = readFileSync(join(out, `${page}.html`), 'utf8')
       expect(html).toContain('<header class="masthead">')
       expect(html).toContain(`href="${CSS_HREF}"`)
       expect(html).toContain(`<link rel="canonical" href="${ORIGIN}/${page}"/>`)
       expect(html).toContain(`<h1>${heading}</h1>`)
-      expect(html).not.toContain('<script')
+      expect(html.match(/<script/g)).toHaveLength(1)
+      expect(html).toContain('<script>')
     }
   })
 
