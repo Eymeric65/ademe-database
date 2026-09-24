@@ -61,6 +61,12 @@ test('a free member is offered the plan, and the button opens Stripe Checkout', 
   expect(calls).toEqual(['POST'])
 })
 
+test('the offer links the CGV the checkout asks to accept', async ({ page }) => {
+  await page.goto('/#/abonnement')
+  await expect(page.getByText('5 € par mois, sans engagement')).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Conditions générales de vente' })).toHaveAttribute('href', '/cgv')
+})
+
 test('somebody signed out is asked to sign in first', async ({ page }) => {
   await page.goto('/#/abonnement')
   await expect(page.getByText('5 € par mois, sans engagement')).toBeVisible()

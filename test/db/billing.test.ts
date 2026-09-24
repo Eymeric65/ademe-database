@@ -144,6 +144,30 @@ describe('checkout', () => {
     expect(await recentStatus(cookie)).toBe(403)
   })
 
+  it('makes the buyer accept the CGV and waive the withdrawal right before paying', async () => {
+    const cookie = await signUp('consent@example.test')
+    let sent = ''
+    fetchMock
+      .get(STRIPE_ORIGIN)
+      .intercept({ method: 'POST', path: '/v1/checkout/sessions' })
+      .reply(200, (opts) => {
+        sent = String(opts.body)
+        return JSON.stringify({ id: 'cs_c', url: 'https://checkout.stripe.invalid/cs_c' })
+      })
+
+    const res = await post(cookie, '/api/billing/checkout')
+    expect(res.status).toBe(200)
+    await res.arrayBuffer()
+
+    const form = new URLSearchParams(sent)
+    expect(form.get('consent_collection[terms_of_service]')).toBe('required')
+    const message = form.get('custom_text[terms_of_service_acceptance][message]') ?? ''
+    // The link is built from the host the checkout was opened on, so a preview links its own CGV.
+    expect(message).toContain('[conditions générales de vente](http://x/cgv)')
+    expect(message).toContain('accès immédiat')
+    expect(message).toContain('droit de rétractation')
+  })
+
   it('reuses the Stripe customer of an earlier subscription', async () => {
     const cookie = await paid('again@example.test', 'cs_a', 'sub_a', { status: 'canceled' })
     let sent = ''

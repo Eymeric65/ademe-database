@@ -147,6 +147,14 @@ export async function createCheckoutSession(
     'automatic_tax[enabled]': 'false',
     allow_promotion_codes: 'false',
     payment_method_collection: 'always',
+    // Not a Studio default: the box to tick before paying. It is what waives the
+    // withdrawal right for immediate access (L221-28 13°), so it must name that
+    // waiver, and it links the host's own CGV so a preview links the preview.
+    // Stripe refuses it unless a Terms of service URL is set in Public details.
+    'consent_collection[terms_of_service]': 'required',
+    'custom_text[terms_of_service_acceptance][message]':
+      `J’accepte les [conditions générales de vente](${input.origin}/cgv) et je demande l’accès immédiat ` +
+      'au service : je renonce ainsi à mon droit de rétractation.',
   })
   // One Stripe customer per account, reused on every resubscription.
   if (input.customerId) form.set('customer', input.customerId)
