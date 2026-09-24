@@ -7,7 +7,8 @@
  * at build time by scripts/prerender.tsx.
  *
  * They carry statistics only. No address, no certificate, nothing that would
- * move the login gate ADR-0012 put in front of the data -- and no script. The
+ * move the login gate ADR-0012 put in front of the data -- and no bundle: the
+ * only script is the masthead's account corner, which reads /api/me. The
  * page's own styles are inlined below; the app's stylesheet is linked only so
  * the masthead is the app's own, the way back into the site from a search
  * result.
@@ -204,30 +205,102 @@ footer { border-top: 1px solid var(--border); margin-top: 3rem; padding-top: 1.2
 type Tab = 'presentation' | 'statistiques'
 
 /**
- * src/App.tsx's masthead, for the pages that run no JavaScript: the same
- * classes, root-absolute paths instead of hash routes, and no account corner --
- * there is no session here to show.
+ * The account corner, for pages with no bundle. The markup ships signed out;
+ * this asks /api/me and, on a 200, adds Enregistrés, the account and « Se
+ * déconnecter » exactly as src/App.tsx draws them. Any failure leaves the
+ * signed-out corner, whose « Se connecter » is a link into the app, so it still
+ * works with scripts off.
+ *
+ * TRAP: `plan !== 'free'`, not `=== 'paid'` -- the star must survive the paid
+ * plan being renamed. And it must never contain "</script".
+ */
+const ACCOUNT_SCRIPT = `(function () {
+  var nav = document.querySelector('.masthead .nav')
+  var corner = document.querySelector('.masthead .account')
+  if (!nav || !corner) return
+  function post(path, body) {
+    return fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+  var signin = corner.querySelector('.signin')
+  if (signin) signin.addEventListener('click', function (e) {
+    e.preventDefault()
+    post('/api/auth/sign-in/social', { provider: 'google', callbackURL: location.origin + '/' })
+      .then(function (r) { return r.json() })
+      .then(function (b) { location.href = b.url })
+      .catch(function () { location.href = '/#/' })
+  })
+  fetch('/api/me', { credentials: 'same-origin' })
+    .then(function (r) { return r.ok ? r.json() : null })
+    .then(function (me) {
+      if (!me || !me.email) return
+      var saved = document.createElement('a')
+      saved.href = '/#/saved'
+      saved.textContent = 'Enregistr\u00e9s'
+      nav.insertBefore(saved, nav.querySelector('a[href="/#/abonnement"]'))
+      var who = document.createElement('span')
+      who.className = 'who'
+      who.textContent = me.email
+      corner.replaceChildren(who)
+      if (me.plan && me.plan !== 'free') {
+        var star = document.createElement('span')
+        star.className = 'premium-star'
+        star.setAttribute('role', 'img')
+        star.setAttribute('aria-label', 'Membre Premium')
+        star.title = 'Membre Premium'
+        star.textContent = '\u2605'
+        corner.appendChild(star)
+      }
+      var out = document.createElement('button')
+      out.type = 'button'
+      out.className = 'link'
+      out.textContent = 'Se d\u00e9connecter'
+      out.addEventListener('click', function () {
+        post('/api/auth/sign-out', {}).finally(function () { location.reload() })
+      })
+      corner.appendChild(out)
+    })
+    .catch(function () {})
+})()`
+
+/**
+ * src/App.tsx's masthead, for the prerendered pages: the same classes and
+ * menu, root-absolute paths instead of hash routes, and an account corner that
+ * ACCOUNT_SCRIPT fills in -- the one script these pages run.
  */
 function StaticMasthead({ current }: { current?: Tab }) {
   const here = (tab: Tab) => (tab === current ? ('page' as const) : undefined)
   return (
-    <header className="masthead">
-      <a className="wordmark" href="/">
-        <span className="badge" data-letter="D" aria-hidden="true">
-          D
-        </span>
-        <span>recherche-maison</span>
-      </a>
-      <nav className="nav" aria-label="Principal">
-        <a href="/presentation" aria-current={here('presentation')}>
-          Présentation
+    <>
+      <header className="masthead">
+        <a className="wordmark" href="/">
+          <span className="badge" data-letter="D" aria-hidden="true">
+            D
+          </span>
+          <span>recherche-maison</span>
         </a>
-        <a href="/departements" aria-current={here('statistiques')}>
-          Statistiques
-        </a>
-        <a href="/">Rechercher</a>
-      </nav>
-    </header>
+        <nav className="nav" aria-label="Principal">
+          <a href="/presentation" aria-current={here('presentation')}>
+            Présentation
+          </a>
+          <a href="/departements" aria-current={here('statistiques')}>
+            Statistiques
+          </a>
+          <a href="/">Rechercher</a>
+          <a href="/#/abonnement">Abonnement</a>
+        </nav>
+        <div className="account">
+          <a className="signin" href="/#/">
+            Se connecter
+          </a>
+        </div>
+      </header>
+      <script dangerouslySetInnerHTML={{ __html: ACCOUNT_SCRIPT }} />
+    </>
   )
 }
 
@@ -831,10 +904,10 @@ export function renderPresentationPage({ stylesheet }: { stylesheet: string }): 
 
         <main>
           {/*
-            TRAP: signedIn does NOT claim anybody is signed in -- this page has
-            no session and ships no JavaScript. It only picks how the two calls
-            to action render, and the other branch is <button onClick>, which
-            is completely inert here. Two dead buttons on a public landing page
+            TRAP: signedIn does NOT claim anybody is signed in -- this page
+            ships no bundle, only the masthead's account script. It only picks
+            how the two calls to action render, and the other branch is
+            <button onClick>, which is completely inert here. Two dead buttons on a public landing page
             is the worse outcome; a link into the app is the point.
           */}
           <Presentation hero signedIn onSignIn={() => {}} />
@@ -884,7 +957,7 @@ export type LegalPage = keyof typeof LEGAL_PAGES
  * src/legal/Legal.tsx, at /cgv and /mentions-legales. Static pages rather than
  * hash routes: they must be readable by anybody, a payment provider's
  * reviewer included, without running the app. Like the Présentation, they
- * link the app's stylesheet and ship no script.
+ * link the app's stylesheet and ship no bundle, only the masthead's script.
  */
 export function renderLegalPage({ page, stylesheet }: { page: LegalPage; stylesheet: string }): string {
   const { title, description, Body } = LEGAL_PAGES[page]
