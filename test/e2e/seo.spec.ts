@@ -136,3 +136,26 @@ test('the sitemap carries the présentation', async ({ page }) => {
   expect(res.status()).toBe(200)
   expect(await res.text()).toContain('<loc>https://recherche-maison.com/presentation</loc>')
 })
+
+/**
+ * www on a PAGE, not an /api path. A request that matches a file in dist/ is
+ * answered by ASSETS without ever reaching the Worker, so the redirect in
+ * server/index.ts never ran for `/` -- people stayed on www, and every sign-in
+ * they tried was refused by Better Auth as an untrusted callback, silently.
+ * test/db/host.test.ts calls the Worker directly and cannot see this.
+ */
+for (const path of ['/', '/presentation', '/departement/ariege']) {
+  test(`www sends ${path} to the apex`, async ({ request }) => {
+    // Host is only ours to choose on the local wrangler dev; on a deployed
+    // preview it would address some other zone entirely.
+    test.skip(!!process.env.E2E_BASE_URL, 'Host override needs the local Worker')
+    const res = await request.get(path, {
+      headers: { Host: 'www.recherche-maison.com' },
+      maxRedirects: 0,
+    })
+    expect(res.status()).toBe(301)
+    const location = new URL(res.headers()['location'] ?? '')
+    expect(location.host).toBe('recherche-maison.com')
+    expect(location.pathname).toBe(path)
+  })
+}
