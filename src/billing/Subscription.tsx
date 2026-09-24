@@ -198,6 +198,9 @@ export function Subscription({
               )}
             </p>
             {error ? <p className="error">{error}</p> : null}
+            <p className="offer-terms">
+              <a href="/cgv">Conditions générales de vente</a>
+            </p>
           </div>
         </>
       )}

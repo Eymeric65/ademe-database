@@ -866,6 +866,11 @@ h1 {
   margin: 1rem 0 0;
 }
 
+.offer-terms {
+  margin: 1rem 0 0;
+  font-size: 0.875rem;
+}
+
 .subscription .error {
   margin: 1rem 0 0;
 }
