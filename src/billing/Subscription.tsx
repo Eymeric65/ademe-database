@@ -215,14 +215,14 @@ export function Subscription({
 
       <div
         className="plans"
-        style={{ gridTemplateColumns: PLANS.map((p) => (p.id === account?.plan ? '1.35fr' : '1fr')).join(' ') }}
+        style={{ gridTemplateColumns: PLANS.map((p) => (p.featured ? '1.35fr' : '1fr')).join(' ') }}
       >
         {PLANS.map((plan) => {
           const current = account?.plan === plan.id
           return (
             <article
               key={plan.id}
-              className={current ? 'plan-card current' : 'plan-card'}
+              className={['plan-card', plan.featured && 'featured', current && 'current'].filter(Boolean).join(' ')}
               style={{ gridRow: `span ${2 + FEATURES.length}` }}
               aria-labelledby={`plan-${plan.id}`}
             >

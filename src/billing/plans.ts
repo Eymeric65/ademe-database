@@ -9,11 +9,13 @@ export type Plan = {
   id: PlanId
   label: string
   price: string
+  /** The plan put forward to everyone: wider and in silver, paid for or not. */
+  featured?: boolean
 }
 
 export const PLANS: readonly Plan[] = [
   { id: 'free', label: 'Gratuit', price: '0 €' },
-  { id: 'decouverte', label: 'Découverte', price: '5 €/mois' },
+  { id: 'decouverte', label: 'Découverte', price: '5 €/mois', featured: true },
 ]
 
 /**

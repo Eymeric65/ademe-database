@@ -47,6 +47,9 @@ async function expectPlans(page: Page, current: 'Gratuit' | 'Découverte' | null
     const [a, b] = [await left.boundingBox(), await right.boundingBox()]
     expect(Math.abs(a!.y - b!.y)).toBeLessThan(2)
   }
+  // The paid plan is the one on show, whoever is looking: always the wider card.
+  const [freeBox, decouverteBox] = [await free.boundingBox(), await decouverte.boundingBox()]
+  expect(decouverteBox!.width).toBeGreaterThan(freeBox!.width * 1.2)
   // The cards inform; every button is in the status line above them.
   await expect(free.getByRole('button')).toHaveCount(0)
   await expect(decouverte.getByRole('button')).toHaveCount(0)

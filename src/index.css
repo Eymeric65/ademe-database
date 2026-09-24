@@ -50,6 +50,14 @@
   --gold-soft: #f3e6bd;
   --gold-soft-dark: #3a2f10;
 
+  /* Silver -- "gin", for the plan put forward before anyone has paid. */
+  --silver-face: #e4e4e0;
+  --silver-face-dark: #34363a;
+  --silver-sheen: #fbfbf8;
+  --silver-sheen-dark: #4a4d52;
+  --silver-edge: #a3a49f;
+  --silver-edge-dark: #7c8086;
+
   /* Type set ON an ink block: paper on a light-mode ink, sumi on a bright one. */
   --ink-contrast-light: #faf7f0;
   --ink-contrast-dark: #17140e;
@@ -93,6 +101,9 @@
 
   --ink-gold: var(--gold-ink);
   --ink-gold-soft: var(--gold-soft);
+  --ink-silver: var(--silver-face);
+  --ink-silver-sheen: var(--silver-sheen);
+  --ink-silver-edge: var(--silver-edge);
 
   /* The offset a stamp casts. Mixed toward the fixed sumi primitive so it stays
      darker than whichever ink is on top of it, in both schemes. */
@@ -120,6 +131,9 @@
 
     --ink-gold: var(--gold-ink-dark);
     --ink-gold-soft: var(--gold-soft-dark);
+    --ink-silver: var(--silver-face-dark);
+    --ink-silver-sheen: var(--silver-sheen-dark);
+    --ink-silver-edge: var(--silver-edge-dark);
   }
 }
 
@@ -887,7 +901,61 @@ h1 {
   background: var(--color-surface);
 }
 
-/* Gold and wider: whichever plan is theirs, the eye lands there first. */
+/* Silver and wider: the paid plan is the one on show, whoever is looking. */
+.plan-card.featured {
+  border-color: var(--ink-silver-edge);
+  background: linear-gradient(
+    135deg,
+    var(--ink-silver) 0%,
+    var(--ink-silver-sheen) 45%,
+    var(--ink-silver) 60%,
+    color-mix(in oklab, var(--ink-silver) 85%, var(--ink-silver-edge)) 100%
+  );
+  box-shadow: 0 1px 0 var(--ink-silver-sheen) inset, 0 6px 18px -10px var(--ink-silver-edge);
+  isolation: isolate;
+}
+
+/* A slow glint crossing the silver. Out of flow, so the subgrid never sees it;
+   under the text (z-index -1 inside the isolated card), so it never washes it. */
+.plan-card.featured::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    color-mix(in oklab, var(--ink-silver-sheen) 55%, transparent) 50%,
+    transparent 65%
+  ) no-repeat;
+  background-size: 250% 100%;
+  animation: plan-glint 6s ease-in-out infinite;
+}
+
+@keyframes plan-glint {
+  0%,
+  55% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-card.featured::after {
+    animation: none;
+    display: none;
+  }
+}
+
+.plan-card.featured h2 {
+  font-size: 1.7rem;
+}
+
+/* Gold: whichever plan is theirs, the eye lands there first. */
 .plan-card.current {
   border-color: var(--ink-gold);
   border-top-width: 4px;
