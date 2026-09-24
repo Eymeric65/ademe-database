@@ -5,9 +5,17 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat"],
 
-  // The React build. Requests that match a file are served from here without
-  // touching the Worker, and those are free and unlimited.
-  "assets": { "directory": "./dist", "binding": "ASSETS" },
+  // The React build. The hashed bundle and the fonts are served from here
+  // without touching the Worker, and those are free and unlimited.
+  //
+  // TRAP: pages must run the Worker first. Otherwise www.recherche-maison.com/
+  // is answered from here, the www -> apex redirect in server/index.ts never
+  // runs, and every sign-in from www is refused by Better Auth -- silently.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/*", "!/assets/*", "!/fonts/*"]
+  },
 
   // App plane only -- accounts and saved state. The 15.5M public certificates
   // are Parquet on R2 and are never read through this binding. See ADR-0001.
