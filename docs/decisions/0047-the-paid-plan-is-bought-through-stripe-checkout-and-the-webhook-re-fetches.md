@@ -3,12 +3,12 @@ status: accepted
 date: 2026-09-22
 area: identity
 supersedes:
-superseded-by:
+superseded-by: 0048 (in part: how the UI reaches the portal)
 ---
 
 # ADR-0047 — The paid plan is bought through Stripe Checkout, and the webhook re-fetches rather than trusts
 
-**Status:** accepted · **Decided:** 2026-09-22 · **Area:** identity
+**Status:** accepted; the portal link is superseded by [ADR-0048](0048-the-portal-is-opened-by-a-session-route-behind-one-panel.md) · **Decided:** 2026-09-22 · **Area:** identity
 
 ## Context and Problem Statement
 

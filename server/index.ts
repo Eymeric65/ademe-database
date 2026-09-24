@@ -37,6 +37,7 @@ import {
 } from './db'
 import {
   createCheckoutSession,
+  createPortalSession,
   readSubscription,
   StripeError,
   stripeKey,
@@ -101,13 +102,14 @@ export const ROUTES: Route[] = [
       // here would mean the two disagreed. Fail closed rather than guess.
       if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
       const { id, name, email } = session.user
-      return json({ id, name, email, plan: await planOf(env, caller), ...(await termsOf(env, caller, email)) })
+      return json({ id, name, email, plan: await planOf(env, caller), ...(await termsOf(env, caller)) })
     },
   },
 
   // --- billing ------------------------------------------------------------
   // The paid plan, bought through Stripe's hosted Checkout. Cancelling and
-  // changing the card happen in Stripe's hosted portal, not here. See ADR-0047.
+  // changing the card happen in Stripe's hosted portal, not here. See ADR-0047
+  // and ADR-0048.
   {
     method: 'POST',
     path: '/api/billing/checkout',
@@ -134,6 +136,31 @@ export const ROUTES: Route[] = [
         })
         await recordCheckout(env, caller, { id: checkout.id })
         return json({ url: checkout.url })
+      })
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/billing/portal',
+    scope: 'self',
+    handle: async ({ request, env, caller }) => {
+      const key = stripeKey(env)
+      if (!key) return json({ error: 'billing unavailable' }, 503)
+      const cancel = (await readJson(request)).cancel === true
+      // The customer is read from the caller's own row, never from the body:
+      // nothing a request says can open another account's portal.
+      const current = await subscriptionOf(env, caller)
+      if (!current?.customerId) return json({ error: 'no subscription' }, 404)
+      if (cancel && !(LIVE.includes(current.status) && current.subscriptionId)) {
+        return json({ error: 'no subscription' }, 404)
+      }
+      return upstream(async () => {
+        const portal = await createPortalSession(key, {
+          customerId: current.customerId as string,
+          origin: new URL(request.url).origin,
+          ...(cancel ? { cancelSubscriptionId: current.subscriptionId as string } : {}),
+        })
+        return json({ url: portal.url })
       })
     },
   },
@@ -305,23 +332,18 @@ type Terms = {
   subscriptionStatus: string | null
   renewsOn: string | null
   endsOn: string | null
-  manageUrl: string | null
 }
 
 /**
  * The caller's subscription, for /api/me: its status as Stripe last said it,
- * when it renews or ends (ISO dates, only while it still entitles), and where
- * to manage it -- Stripe's hosted portal, with the account's email filled in.
- * A checkout opened and never paid is not a subscription yet.
+ * and when it renews or ends (ISO dates, only while it still entitles). A
+ * checkout opened and never paid is not a subscription yet.
  */
-async function termsOf(env: Env, caller: Caller, email: string): Promise<Terms> {
+async function termsOf(env: Env, caller: Caller): Promise<Terms> {
   const sub = await subscriptionOf(env, caller)
-  if (!sub) return { subscriptionStatus: null, renewsOn: null, endsOn: null, manageUrl: null }
-  const manageUrl = env.STRIPE_PORTAL_URL
-    ? `${env.STRIPE_PORTAL_URL}?prefilled_email=${encodeURIComponent(email)}`
-    : null
+  if (!sub) return { subscriptionStatus: null, renewsOn: null, endsOn: null }
   const now = Math.floor(Date.now() / 1000)
-  const base = { subscriptionStatus: sub.status, manageUrl }
+  const base = { subscriptionStatus: sub.status }
   if (!ENTITLING.includes(sub.status as never) || sub.paidUntil == null || sub.paidUntil + GRACE_SECONDS <= now) {
     return { ...base, renewsOn: null, endsOn: null }
   }

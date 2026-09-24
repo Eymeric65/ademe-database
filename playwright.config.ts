@@ -65,9 +65,7 @@ export default defineConfig({
           // is local-only; production's is set with `wrangler secret put`.
           command:
             'npm run build && npx wrangler dev --env preview --port 8787' +
-            ' --var BETTER_AUTH_SECRET:local-development-only-not-a-real-secret' +
-            // Never followed: billing.spec.ts only checks where the link points.
-            ' --var STRIPE_PORTAL_URL:https://billing.stripe.test/p/login/e2e',
+            ' --var BETTER_AUTH_SECRET:local-development-only-not-a-real-secret',
           // /api/health is the readiness probe on purpose: it answers only
           // once the Worker is up AND the migrations have run, so a spec never
           // races an empty database.

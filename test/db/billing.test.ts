@@ -310,23 +310,92 @@ describe('what entitles', () => {
 })
 
 describe('what /api/me says about billing', () => {
-  it('gives a subscriber their status and the portal, with their email filled in', async () => {
+  it('gives a subscriber their status, and no portal link: the portal is a session now (ADR-0048)', async () => {
     const cookie = await paid('portal@example.test', 'cs_p', 'sub_p', { status: 'past_due' })
-    expect(await me(cookie)).toMatchObject({
-      plan: 'free',
-      subscriptionStatus: 'past_due',
-      manageUrl: 'https://billing.stripe.invalid/p/login/test?prefilled_email=portal%40example.test',
-    })
+    const body = await me(cookie)
+    expect(body).toMatchObject({ plan: 'free', subscriptionStatus: 'past_due' })
+    expect(body).not.toHaveProperty('manageUrl')
   })
 
-  it('gives a free member no status and nothing to manage', async () => {
+  it('gives a free member no status', async () => {
     const cookie = await signUp('never@example.test')
-    expect(await me(cookie)).toMatchObject({ plan: 'free', subscriptionStatus: null, manageUrl: null })
+    expect(await me(cookie)).toMatchObject({ plan: 'free', subscriptionStatus: null })
   })
 
-  it('gives nothing to manage while a checkout is only opened', async () => {
+  it('gives no status while a checkout is only opened', async () => {
     const cookie = await checkedOut('opened@example.test', 'cs_q')
-    expect(await me(cookie)).toMatchObject({ subscriptionStatus: null, manageUrl: null })
+    expect(await me(cookie)).toMatchObject({ subscriptionStatus: null })
+  })
+})
+
+describe('the portal', () => {
+  function portal(cookie: string, body: unknown): Promise<Response> {
+    return SELF.fetch('http://x/api/billing/portal', {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
+  /** Answer one portal session and hand back the form it was asked with. */
+  function stubPortal(): { form: () => URLSearchParams } {
+    let sent = ''
+    fetchMock
+      .get(STRIPE_ORIGIN)
+      .intercept({ method: 'POST', path: '/v1/billing_portal/sessions' })
+      .reply(200, (opts) => {
+        sent = String(opts.body)
+        return JSON.stringify({ id: 'bps_1', url: 'https://billing.stripe.invalid/session/bps_1' })
+      })
+    return { form: () => new URLSearchParams(sent) }
+  }
+
+  it('opens a session for the caller\'s own customer, returning to the host they came from', async () => {
+    const cookie = await paid('manage@example.test', 'cs_m', 'sub_m')
+    const stub = stubPortal()
+    const res = await portal(cookie, {})
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ url: 'https://billing.stripe.invalid/session/bps_1' })
+    expect(stub.form().get('customer')).toBe('cus_of_sub_m')
+    expect(stub.form().get('return_url')).toBe('http://x/#/abonnement')
+    expect(stub.form().get('flow_data[type]')).toBeNull()
+  })
+
+  it('deep-links a cancel to the caller\'s own live subscription', async () => {
+    const cookie = await paid('leaving@example.test', 'cs_l', 'sub_l')
+    const stub = stubPortal()
+    const res = await portal(cookie, { cancel: true })
+    expect(res.status).toBe(200)
+    await res.arrayBuffer()
+    expect(stub.form().get('flow_data[type]')).toBe('subscription_cancel')
+    expect(stub.form().get('flow_data[subscription_cancel][subscription]')).toBe('sub_l')
+    expect(stub.form().get('flow_data[after_completion][redirect][return_url]')).toBe('http://x/?abonnement=resilie')
+  })
+
+  it('answers 404, and asks Stripe nothing, for an account with no customer', async () => {
+    const cookie = await checkedOut('nocustomer@example.test', 'cs_n')
+    const res = await portal(cookie, {})
+    expect(res.status).toBe(404)
+    await res.arrayBuffer()
+  })
+
+  it('answers 404 to a cancel once the subscription is over, but still opens the invoices', async () => {
+    const cookie = await paid('gone@example.test', 'cs_g', 'sub_g', { status: 'canceled' })
+    const refused = await portal(cookie, { cancel: true })
+    expect(refused.status).toBe(404)
+    await refused.arrayBuffer()
+    stubPortal()
+    const res = await portal(cookie, {})
+    expect(res.status).toBe(200)
+    await res.arrayBuffer()
+  })
+
+  it('answers 502 when Stripe fails', async () => {
+    const cookie = await paid('down@example.test', 'cs_d', 'sub_d')
+    stripe('POST', '/billing_portal/sessions', { status: 500, body: { error: { message: 'boom' } } })
+    const res = await portal(cookie, {})
+    expect(res.status).toBe(502)
+    await res.arrayBuffer()
   })
 })
 
@@ -346,12 +415,14 @@ describe('with Stripe unconfigured', () => {
   it('answers 503 on every billing route rather than guessing', async () => {
     const bare = { STRIPE_SECRET_KEY: undefined, STRIPE_WEBHOOK_SECRET: undefined, STRIPE_PRICE_ID: undefined }
     expect(await call('/api/billing/checkout', bare)).toBe(503)
+    expect(await call('/api/billing/portal', bare)).toBe(503)
     expect(await call('/api/billing/webhook', bare)).toBe(503)
   })
 
   it('refuses a live key where only test mode is allowed', async () => {
     const live = { STRIPE_SECRET_KEY: 'sk_live_not_a_real_key', STRIPE_TEST_MODE_ONLY: '1' }
     expect(await call('/api/billing/checkout', live)).toBe(503)
+    expect(await call('/api/billing/portal', live)).toBe(503)
     expect(await call('/api/billing/webhook', live)).toBe(503)
   })
 })

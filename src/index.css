@@ -866,6 +866,45 @@ h1 {
   margin: 1rem 0 0;
 }
 
+.subscription .error {
+  margin: 1rem 0 0;
+}
+
+/* « Avant de partir »: one panel, cut like the offer. Its two buttons are the
+   same stamp on purpose -- neither may outweigh the other (ADR-0048). */
+.leaving-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--color-bg) 70%, transparent);
+}
+
+.leaving {
+  max-width: 32rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border: 1px solid var(--ink-gold);
+  border-top-width: 4px;
+  border-radius: var(--radius-tight);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.leaving h2 {
+  margin: 0 0 1rem;
+  outline: none;
+}
+
+.leaving p {
+  margin: 0 0 0.75rem;
+}
+
+.leaving .actions {
+  margin: 1.5rem 0 0;
+}
+
 /* A tab hanging from the row's top rule, like an index card's. */
 .hit > .premium {
   position: absolute;
