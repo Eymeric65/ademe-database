@@ -868,26 +868,27 @@ h1 {
 }
 
 .plans {
-  display: flex;
-  align-items: flex-start;
-  gap: 1.5rem;
+  display: grid;
+  column-gap: 1.5rem;
   margin-top: 2.5rem;
   max-width: 48rem;
 }
 
+/* Each card spans the same rows of the outer grid -- head, price, one per
+   feature -- so a feature sits level in every card however tall the head. */
 .plan-card {
   position: relative;
-  flex: 1 1 0;
+  display: grid;
+  grid-template-rows: subgrid;
+  row-gap: 0;
   padding: 1.25rem 1.25rem 1.1rem;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-tight);
   background: var(--color-surface);
 }
 
-/* Larger and in gold: whichever plan is theirs, the eye lands there first. */
+/* Gold and wider: whichever plan is theirs, the eye lands there first. */
 .plan-card.current {
-  flex-grow: 1.35;
-  padding: 1.75rem 1.5rem 1.5rem;
   border-color: var(--ink-gold);
   border-top-width: 4px;
 }
@@ -914,10 +915,34 @@ h1 {
 }
 
 .plan-card ul {
-  margin: 0;
-  padding-left: 1.1rem;
   display: grid;
-  gap: 0.4rem;
+  grid-template-rows: subgrid;
+  row-gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-card li {
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+}
+
+.plan-card li.excluded {
+  color: var(--color-muted);
+}
+
+.plan-mark {
+  flex: none;
+  width: 1rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--ink-gold);
+}
+
+.plan-card li.excluded .plan-mark {
+  color: var(--color-muted);
 }
 
 /* A tab hanging from the card's top rule, like the one on a paid row. */
@@ -952,8 +977,8 @@ h1 {
 
 @media (max-width: 40rem) {
   .plans {
-    flex-direction: column;
-    align-items: stretch;
+    grid-template-columns: 1fr !important;
+    row-gap: 1.5rem;
   }
 }
 

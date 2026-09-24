@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError } from '../api'
 import type { Account } from '../auth'
 import type { CheckoutReturn } from '../routes'
-import { PLANS, planLabel } from './plans'
+import { FEATURES, PLANS, planLabel } from './plans'
 
 /** How long the page waits for Stripe's webhook after a paid checkout. */
 const ACTIVATION_WAIT_MS = 30_000
@@ -213,23 +213,39 @@ export function Subscription({
         ) : null}
       </div>
 
-      <div className="plans">
+      <div
+        className="plans"
+        style={{ gridTemplateColumns: PLANS.map((p) => (p.id === account?.plan ? '1.35fr' : '1fr')).join(' ') }}
+      >
         {PLANS.map((plan) => {
           const current = account?.plan === plan.id
           return (
             <article
               key={plan.id}
               className={current ? 'plan-card current' : 'plan-card'}
+              style={{ gridRow: `span ${2 + FEATURES.length}` }}
               aria-labelledby={`plan-${plan.id}`}
             >
               {current ? <p className="plan-marker">Votre plan</p> : null}
-              <h2 id={`plan-${plan.id}`}>{plan.label}</h2>
-              {current && account?.planSource === 'lifetime' ? <p className="plan-tag">Plan à vie</p> : null}
+              <div className="plan-head">
+                <h2 id={`plan-${plan.id}`}>{plan.label}</h2>
+                {current && account?.planSource === 'lifetime' ? (
+                  <p className="plan-tag">Plan à vie donné par l’admin</p>
+                ) : null}
+              </div>
               <p className="plan-price">{plan.price}</p>
-              <ul>
-                {plan.perks.map((perk) => (
-                  <li key={perk}>{perk}</li>
-                ))}
+              <ul style={{ gridRow: `span ${FEATURES.length}` }}>
+                {FEATURES.map((feature) => {
+                  const included = feature.plans.includes(plan.id)
+                  return (
+                    <li key={feature.label} className={included ? undefined : 'excluded'}>
+                      <span className="plan-mark" role="img" aria-label={included ? 'Inclus' : 'Non inclus'}>
+                        {included ? '✓' : '✗'}
+                      </span>
+                      {feature.label}
+                    </li>
+                  )
+                })}
               </ul>
             </article>
           )

@@ -31,10 +31,22 @@ async function expectPlans(page: Page, current: 'Gratuit' | 'Découverte' | null
   const decouverte = page.getByRole('article', { name: 'Découverte' })
   await expect(free).toBeVisible()
   await expect(free).toContainText('0 €')
-  await expect(free).toContainText('Recherche dans tous les DPE publiés')
   await expect(decouverte).toBeVisible()
   await expect(decouverte).toContainText('5 €/mois')
-  await expect(decouverte).toContainText('Les deux derniers mois disponibles à la recherche')
+  // One comparison: the same rows in every card, ticked or crossed, level
+  // with each other so the eye reads across.
+  const rows: [string, boolean, boolean][] = [
+    ['Accès aux DPE historiques', true, true],
+    ['Accès aux DPE des deux derniers mois', false, true],
+  ]
+  for (const [feature, inFree, inDecouverte] of rows) {
+    const left = free.getByRole('listitem').filter({ hasText: feature })
+    const right = decouverte.getByRole('listitem').filter({ hasText: feature })
+    await expect(left.getByRole('img', { name: inFree ? 'Inclus' : 'Non inclus', exact: true })).toBeVisible()
+    await expect(right.getByRole('img', { name: inDecouverte ? 'Inclus' : 'Non inclus', exact: true })).toBeVisible()
+    const [a, b] = [await left.boundingBox(), await right.boundingBox()]
+    expect(Math.abs(a!.y - b!.y)).toBeLessThan(2)
+  }
   // The cards inform; every button is in the status line above them.
   await expect(free.getByRole('button')).toHaveCount(0)
   await expect(decouverte.getByRole('button')).toHaveCount(0)
@@ -204,7 +216,7 @@ test('an account given the plan by hand is told so, with nothing to manage', asy
 
   await expect(page.getByText('Vous êtes actuellement sur le plan Découverte.')).toBeVisible()
   await expectPlans(page, 'Découverte')
-  await expect(page.getByRole('article', { name: 'Découverte' }).getByText('Plan à vie', { exact: true })).toBeVisible()
+  await expect(page.getByRole('article', { name: 'Découverte' }).getByText('Plan à vie donné par l’admin', { exact: true })).toBeVisible()
   await expect(page.getByRole('article', { name: 'Gratuit' }).getByText('Plan à vie')).toHaveCount(0)
   // Nothing to buy, renew or cancel: not one button on the page.
   await expect(page.locator('.subscription').getByRole('button')).toHaveCount(0)
