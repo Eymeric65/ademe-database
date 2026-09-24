@@ -341,6 +341,15 @@ h2 {
   white-space: nowrap;
 }
 
+/* The same gold as the tab on what the plan opens. Not inside .who, which
+   phones hide. */
+.premium-star {
+  margin-left: -0.5rem;
+  color: var(--ink-gold);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
 /* --- the ink stamp ------------------------------------------------------- */
 
 /*
