@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { makePaid, signUpViaApi, uniqueEmail } from './helpers'
 
 /**
  * The département pages are the only URLs a crawler can index, and a crawler
@@ -27,11 +28,13 @@ test('a département page renders its statistics without any JavaScript', async 
   // The consumption median: a number that can only have come from the aggregate.
   await expect(page.locator('body')).toContainText('203,7')
 
-  // No bundle: the page must carry nothing a crawler would have to execute.
+  // No bundle: the page must carry nothing a crawler would have to execute --
+  // the JSON-LD, and the masthead's inline account script, which only adds.
   const scripts = await page.locator('script').evaluateAll((els) =>
     els.map((el) => `${el.getAttribute('src') ?? ''}|${el.getAttribute('type') ?? ''}`),
   )
-  expect(scripts.every((s) => s === '|application/ld+json')).toBe(true)
+  expect(scripts.filter((s) => s === '|')).toHaveLength(1)
+  expect(scripts.every((s) => s === '|application/ld+json' || s === '|')).toBe(true)
 
   // The crawl path: every OTHER département the aggregate carries is one link
   // away -- here the sample's second one, Haute-Garonne.
@@ -92,8 +95,9 @@ test('the présentation renders at its own URL, with links rather than dead butt
   expect(sheet.status()).toBe(200)
   expect(await sheet.text()).toContain('.pres-hero')
 
-  // Zero JavaScript: not one script tag of any kind.
-  expect(await page.locator('script').count()).toBe(0)
+  // No bundle: the masthead's inline account script is the only one.
+  expect(await page.locator('script').count()).toBe(1)
+  expect(await page.locator('script[src]').count()).toBe(0)
 
   await expect(page.locator('link[rel=canonical]')).toHaveAttribute(
     'href',
@@ -131,6 +135,25 @@ test('the index of départements links every page, under the app’s masthead', 
   await expect(page).toHaveURL(/\/departements$/)
 })
 
+test('the terms of sale and the legal notice are one click from the présentation, with no bundle', async ({
+  page,
+}) => {
+  await page.goto('/presentation')
+  await page.getByRole('link', { name: 'Conditions générales de vente' }).click()
+  await expect(page).toHaveURL(/\/cgv$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Conditions générales de vente')
+  await expect(page.locator('body')).toContainText('5 € TTC par mois')
+  await expect(page.locator('header.masthead')).toHaveCSS('position', 'sticky')
+  expect(await page.locator('script').count()).toBe(1)
+  expect(await page.locator('script[src]').count()).toBe(0)
+
+  // Exact: section 8 of the terms links « mentions légales » too.
+  await page.getByRole('link', { name: 'Mentions légales', exact: true }).click()
+  await expect(page).toHaveURL(/\/mentions-legales$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Mentions légales')
+  await expect(page.locator('body')).toContainText('Cloudflare')
+})
+
 test('the sitemap carries the présentation', async ({ page }) => {
   const res = await page.request.get('/sitemap.xml')
   expect(res.status()).toBe(200)
@@ -159,3 +182,52 @@ for (const path of ['/', '/presentation', '/departement/ariege']) {
     expect(location.pathname).toBe(path)
   })
 }
+
+/**
+ * The static pages wear the app's whole menu, account corner included. Their
+ * markup is signed out; a small inline script asks /api/me and upgrades it, so
+ * these run WITH JavaScript -- the file's default is off.
+ */
+test.describe('the static masthead with a session', () => {
+  test.use({ javaScriptEnabled: true })
+
+  for (const path of ['/presentation', '/departements']) {
+    test(`signed out, ${path} offers Abonnement and « Se connecter », not Enregistrés`, async ({ page }) => {
+      await page.goto(path)
+      const menu = page.getByRole('navigation', { name: 'Principal' })
+      await expect(menu.getByRole('link', { name: 'Abonnement' })).toHaveAttribute('href', '/#/abonnement')
+      await expect(page.locator('.account .signin')).toHaveText('Se connecter')
+      await expect(menu.getByRole('link', { name: 'Enregistrés' })).toHaveCount(0)
+    })
+
+    test(`signed in, ${path} shows the account, Enregistrés and « Se déconnecter »`, async ({ page }) => {
+      const email = uniqueEmail('static-menu')
+      await signUpViaApi(page, email)
+      await page.goto(path)
+      const menu = page.getByRole('navigation', { name: 'Principal' })
+      await expect(menu.getByRole('link', { name: 'Enregistrés' })).toHaveAttribute('href', '/#/saved')
+      await expect(menu.getByRole('link', { name: 'Abonnement' })).toBeVisible()
+      await expect(page.locator('.account .who')).toHaveText(email)
+      await expect(page.locator('.account .premium-star')).toHaveCount(0)
+      await expect(page.locator('.account .signin')).toHaveCount(0)
+    })
+  }
+
+  test('a paid member wears the premium star on a static page', async ({ page }) => {
+    const email = uniqueEmail('static-star')
+    await signUpViaApi(page, email)
+    await makePaid(page, email)
+    await page.goto('/departements')
+    await expect(page.locator('.account').getByRole('img', { name: 'Membre Premium' })).toBeVisible()
+  })
+
+  test('« Se déconnecter » on a static page signs out and restores the signed-out corner', async ({ page }) => {
+    const email = uniqueEmail('static-out')
+    await signUpViaApi(page, email)
+    await page.goto('/presentation')
+    await page.getByRole('button', { name: 'Se déconnecter' }).click()
+    await expect(page.locator('.account .signin')).toHaveText('Se connecter')
+    await expect(page.getByText(email)).toHaveCount(0)
+    expect((await page.request.get('/api/me')).status()).toBe(401)
+  })
+})

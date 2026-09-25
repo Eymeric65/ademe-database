@@ -16,18 +16,35 @@
  */
 
 import {
+  applyCheckout,
+  applySubscription,
   authFor,
   callerFrom,
   deleteSavedBuilding,
   deleteSavedSearch,
+  ENTITLING,
   ensureMigrated,
+  GRACE_SECONDS,
+  isKnownBilling,
   listSavedBuildings,
   listSavedSearches,
+  planAndSourceOf,
   planOf,
+  recordCheckout,
   saveBuilding,
   saveSearch,
+  subscriptionOf,
   type Caller,
 } from './db'
+import {
+  createCheckoutSession,
+  createPortalSession,
+  readSubscription,
+  StripeError,
+  stripeKey,
+  subscriptionOfCheckout,
+  verifySignature,
+} from './stripe'
 import { SAVED_SOURCES } from '../db/schema'
 
 /**
@@ -37,7 +54,8 @@ import { SAVED_SOURCES } from '../db/schema'
  * outright. See ADR-0012.
  *
  * `paid` is `signed-in` plus the caller's plan: data with no owner that only
- * paid accounts may read. The same test keeps it off /api. See ADR-0038.
+ * paid accounts -- any plan but `free` -- may read. The same test keeps it off
+ * /api. See ADR-0038 and ADR-0049.
  */
 type Scope = 'public' | 'signed-in' | 'paid' | 'self' | 'owner'
 
@@ -86,7 +104,111 @@ export const ROUTES: Route[] = [
       // here would mean the two disagreed. Fail closed rather than guess.
       if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
       const { id, name, email } = session.user
-      return json({ id, name, email, plan: await planOf(env, caller) })
+      const { plan, source } = await planAndSourceOf(env, caller)
+      return json({ id, name, email, plan, planSource: source, ...(await termsOf(env, caller)) })
+    },
+  },
+
+  // --- billing ------------------------------------------------------------
+  // The paid plan, bought through Stripe's hosted Checkout. Cancelling and
+  // changing the card happen in Stripe's hosted portal, not here. See ADR-0047
+  // and ADR-0048.
+  {
+    method: 'POST',
+    path: '/api/billing/checkout',
+    scope: 'self',
+    handle: async ({ request, env, caller }) => {
+      const key = stripeKey(env)
+      if (!key || !env.STRIPE_PRICE_ID) return json({ error: 'billing unavailable' }, 503)
+      if ((await planOf(env, caller)) !== 'free') return json({ error: 'already paid' }, 409)
+      // A subscription still alive at Stripe would go on charging beside a new
+      // one, even while it reads as free here (an unpaid renewal).
+      const current = await subscriptionOf(env, caller)
+      if (current && LIVE.includes(current.status)) return json({ error: 'already subscribed' }, 409)
+      const origin = new URL(request.url).origin
+      const session = await authFor(env, origin).api.getSession({ headers: request.headers })
+      if (!session || session.user.id !== caller.sub) return json({ error: 'unauthorized' }, 401)
+
+      return upstream(async () => {
+        const checkout = await createCheckoutSession(key, {
+          priceId: env.STRIPE_PRICE_ID as string,
+          userId: caller.sub,
+          email: session.user.email,
+          customerId: current?.customerId ?? null,
+          origin,
+        })
+        await recordCheckout(env, caller, { id: checkout.id })
+        return json({ url: checkout.url })
+      })
+    },
+  },
+  {
+    method: 'POST',
+    path: '/api/billing/portal',
+    scope: 'self',
+    handle: async ({ request, env, caller }) => {
+      const key = stripeKey(env)
+      if (!key) return json({ error: 'billing unavailable' }, 503)
+      const cancel = (await readJson(request)).cancel === true
+      // The customer is read from the caller's own row, never from the body:
+      // nothing a request says can open another account's portal.
+      const current = await subscriptionOf(env, caller)
+      if (!current?.customerId) return json({ error: 'no subscription' }, 404)
+      if (cancel && !(LIVE.includes(current.status) && current.subscriptionId)) {
+        return json({ error: 'no subscription' }, 404)
+      }
+      return upstream(async () => {
+        const portal = await createPortalSession(key, {
+          customerId: current.customerId as string,
+          origin: new URL(request.url).origin,
+          ...(cancel ? { cancelSubscriptionId: current.subscriptionId as string } : {}),
+        })
+        return json({ url: portal.url })
+      })
+    },
+  },
+  // No session: Stripe calls this. The signature is the gate, and the body is
+  // only a poke -- nothing in it is written, only its type and an id are read,
+  // and the state is fetched back from Stripe with the secret key. An id no
+  // owner's checkout created changes nothing, because nothing here inserts.
+  {
+    method: 'POST',
+    path: '/api/billing/webhook',
+    scope: 'public',
+    handle: async ({ request, env }) => {
+      const key = stripeKey(env)
+      if (!key || !env.STRIPE_WEBHOOK_SECRET) return json({ error: 'billing unavailable' }, 503)
+      const raw = await request.text()
+      const signed = await verifySignature({
+        secret: env.STRIPE_WEBHOOK_SECRET,
+        header: request.headers.get('stripe-signature'),
+        body: raw,
+        now: Math.floor(Date.now() / 1000),
+      })
+      if (!signed) return json({ error: 'bad signature' }, 400)
+
+      let type = ''
+      let id = ''
+      try {
+        const event = JSON.parse(raw) as { type?: unknown; data?: { object?: { id?: unknown } } }
+        type = str(event.type)
+        id = str(event.data?.object?.id)
+      } catch {
+        // Signed but unreadable: nothing to act on, and redelivery will not fix it.
+      }
+      return upstream(async () => {
+        if (type === 'checkout.session.completed' && id && (await isKnownBilling(env, { checkoutId: id }))) {
+          const sub = await subscriptionOfCheckout(key, id)
+          if (sub) await applyCheckout(env, id, await readSubscription(key, sub))
+        } else if (
+          type.startsWith('customer.subscription.') &&
+          id &&
+          (await isKnownBilling(env, { subscriptionId: id }))
+        ) {
+          await applySubscription(env, await readSubscription(key, id))
+        }
+        return new Response(null, { status: 204 })
+      })
     },
   },
 
@@ -205,6 +327,46 @@ export const ROUTES: Route[] = [
     handle: ({ request, env }) => serveObject(request, env, { immutable: false, noStore: true }),
   },
 ]
+
+/** Statuses in which Stripe will still charge, paid for or not. */
+const LIVE: string[] = ['trialing', 'active', 'past_due', 'unpaid', 'paused']
+
+type Terms = {
+  subscriptionStatus: string | null
+  renewsOn: string | null
+  endsOn: string | null
+}
+
+/**
+ * The caller's subscription, for /api/me: its status as Stripe last said it,
+ * and when it renews or ends (ISO dates, only while it still entitles). A
+ * checkout opened and never paid is not a subscription yet.
+ */
+async function termsOf(env: Env, caller: Caller): Promise<Terms> {
+  const sub = await subscriptionOf(env, caller)
+  if (!sub) return { subscriptionStatus: null, renewsOn: null, endsOn: null }
+  const now = Math.floor(Date.now() / 1000)
+  const base = { subscriptionStatus: sub.status }
+  if (!ENTITLING.includes(sub.status as never) || sub.paidUntil == null || sub.paidUntil + GRACE_SECONDS <= now) {
+    return { ...base, renewsOn: null, endsOn: null }
+  }
+  const day = new Date(sub.paidUntil * 1000).toISOString().slice(0, 10)
+  return sub.cancelAtPeriodEnd ? { ...base, renewsOn: null, endsOn: day } : { ...base, renewsOn: day, endsOn: null }
+}
+
+/**
+ * Run a handler that talks to Stripe. Its failure is a 502, never a crash --
+ * and on the webhook a 5xx is what makes Stripe deliver again.
+ */
+async function upstream(run: () => Promise<Response>): Promise<Response> {
+  try {
+    return await run()
+  } catch (e) {
+    if (!(e instanceof StripeError)) throw e
+    console.error('stripe', e.message)
+    return json({ error: 'billing provider unavailable' }, 502)
+  }
+}
 
 /** Bodies are validated by hand; a schema library is not worth a dependency here. */
 async function readJson(request: Request): Promise<Record<string, unknown>> {
@@ -493,7 +655,7 @@ async function dispatch(request: Request, env: Env, url: URL): Promise<Response>
   }
   if (!matched) return json({ error: 'not found' }, 404)
   // see ADR-0038
-  if (matched.route.scope === 'paid' && (await planOf(env, caller)) !== 'paid') {
+  if (matched.route.scope === 'paid' && (await planOf(env, caller)) === 'free') {
     return json({ error: 'forbidden' }, 403)
   }
 

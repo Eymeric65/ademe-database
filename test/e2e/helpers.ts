@@ -18,7 +18,7 @@ export async function signUpViaApi(page: Page, email: string): Promise<void> {
 }
 
 /**
- * Make an account paid the one way there is: an UPDATE on D1 (ADR-0038).
+ * Put an account on Découverte the one way there is: an UPDATE on D1 (ADR-0038).
  *
  * Against the preview D1 `wrangler dev --env preview` reads, locally -- or the
  * deployed preview's, remotely, when E2E_BASE_URL points at one. Reads the
@@ -31,10 +31,32 @@ export async function makePaid(page: Page, email: string): Promise<void> {
   execFileSync('npx', [
     'wrangler', 'd1', 'execute', 'ademe-app-preview', '--env', 'preview',
     process.env.E2E_BASE_URL ? '--remote' : '--local',
-    '--command', `UPDATE user SET plan = 'paid', updated_at = unixepoch() WHERE email = '${email}'`,
+    '--command', `UPDATE user SET plan = 'decouverte', updated_at = unixepoch() WHERE email = '${email}'`,
   ], { stdio: 'pipe' })
   const me = (await (await page.request.get('/api/me')).json()) as { plan?: string }
-  if (me.plan !== 'paid') throw new Error(`${email} is still ${me.plan} after the UPDATE`)
+  if (me.plan !== 'decouverte') throw new Error(`${email} is still ${me.plan} after the UPDATE`)
+}
+
+/**
+ * Give an account a Stripe subscription the way the webhook leaves one: a row
+ * in `subscription` (ADR-0047). Stripe itself is not in the loop -- the
+ * webhook's side is tested in test/db/billing.test.ts -- so this writes the
+ * row directly, on the same D1 `makePaid` writes to.
+ */
+export function subscribe(
+  email: string,
+  { status = 'active', days = 30, cancelAtPeriodEnd = false } = {},
+): void {
+  if (!/^[a-z0-9-]+@example\.test$/.test(email)) throw new Error(`not a test account: ${email}`)
+  const tag = email.split('@')[0]
+  execFileSync('npx', [
+    'wrangler', 'd1', 'execute', 'ademe-app-preview', '--env', 'preview',
+    process.env.E2E_BASE_URL ? '--remote' : '--local',
+    '--command',
+    'INSERT INTO subscription (id, user_id, subscription_id, customer_id, status, paid_until, cancel_at_period_end) ' +
+      `SELECT 'cs_e2e_${tag}', id, 'sub_e2e_${tag}', 'cus_e2e_${tag}', '${status}', ` +
+      `unixepoch() + ${Math.round(days * 86400)}, ${cancelAtPeriodEnd ? 1 : 0} FROM user WHERE email = '${email}'`,
+  ], { stdio: 'pipe' })
 }
 
 export function uniqueEmail(prefix: string): string {

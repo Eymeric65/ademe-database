@@ -423,6 +423,8 @@ export type Hit = {
   date: string | null
   /** The day a weekly run found it gone from ADEME, or null while it is live. */
   withdrawn: string | null
+  /** Read from the paid tree (ADR-0039): what a paid member's plan gives them. */
+  recent: boolean
   surface: number | null
   kind: string | null
   etape: string | null
@@ -483,6 +485,8 @@ export function toHit(src: Source, row: Record<string, unknown>): Hit {
     ges: str(row[src.gesCol]),
     date: isoDate(row[src.dateCol]),
     withdrawn: isoDate(row[WITHDRAWN]),
+    // Both the buffer names and the URLs of the paid tree start `recent/`.
+    recent: /(^|\/)recent\//.test(file),
     surface: num(row[src.surface.col]),
     kind: str(row[src.kindCol]),
     etape: src.id === 'audit' ? str(row.etape_travaux) : null,

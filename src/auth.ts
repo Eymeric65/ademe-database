@@ -1,8 +1,24 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, ApiError } from './api'
+import type { PlanId } from './billing/plans'
 
-/** `plan` is set on D1 by hand; only 'paid' reads the last two months (ADR-0038). */
-export type Account = { id: string; name: string; email: string; plan: 'free' | 'paid' }
+/**
+ * `plan` is 'decouverte' for a comp set on D1 by hand (ADR-0038) or a Stripe
+ * subscription in force (ADR-0047); any plan but 'free' reads the last two
+ * months. `planSource` says which of the two, and is null on 'free' (ADR-0049).
+ * The rest describes that subscription, and is null without one.
+ */
+export type Account = {
+  id: string
+  name: string
+  email: string
+  plan: PlanId
+  planSource: 'lifetime' | 'stripe' | null
+  subscriptionStatus: string | null
+  /** ISO dates, set only while the subscription entitles. */
+  renewsOn: string | null
+  endsOn: string | null
+}
 
 /**
  * Who is signed in, from /api/me.

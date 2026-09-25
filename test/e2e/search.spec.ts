@@ -430,8 +430,9 @@ test('a free member is told how many newer certificates match, and shown none', 
   await searchTarget(page, { wide: true })
 
   await expect(page.locator('.recent-locked')).toContainText(
-    '1 certificat plus récent — devenez membre payant pour y accéder',
+    '1 certificat plus récent — passez au plan Découverte pour y accéder',
   )
+  await expect(page.locator('.recent-locked-note a')).toHaveAttribute('href', '#/abonnement')
   await expect(page.locator('.map-recent-note')).toHaveText('1 certificat plus récent non affiché sur la carte')
   // The blurred rows are placeholders: nothing in them is the certificate.
   await expect(page.getByText(RECENT.address)).toHaveCount(0)
@@ -444,7 +445,7 @@ test('a free member following a link to a recent certificate is told why it is n
 
   await expect(page.getByText('Introuvable dans logement existant.')).toBeVisible({ timeout: 30_000 })
   await expect(
-    page.getByText('Les certificats de moins de deux mois sont réservés aux membres payants.'),
+    page.getByText('Les certificats de moins de deux mois sont réservés au plan Découverte.'),
   ).toBeVisible()
 })
 
@@ -461,4 +462,28 @@ test('a paid member gets the newest certificate first, and opens it', async ({ p
 
   await page.getByRole('link', { name: RECENT.address }).click()
   await expect(page.getByRole('heading', { name: RECENT.address })).toBeVisible({ timeout: 30_000 })
+})
+
+test('a paid member sees which certificates their plan gives them, in the list and on the page', async ({ page }) => {
+  const email = uniqueEmail('recent-premium')
+  await signUpViaApi(page, email)
+  await makePaid(page, email)
+  await searchTarget(page, { wide: true })
+
+  // Only the paid tree's row carries the tab: the rest are free to everyone.
+  const hit = page.locator('.hit', { hasText: RECENT.address })
+  await expect(hit.locator('.premium')).toHaveText('Premium')
+  await expect(page.locator('.hits .premium')).toHaveCount(1)
+
+  await page.getByRole('link', { name: RECENT.address }).click()
+  await expect(page.getByRole('heading', { name: RECENT.address })).toBeVisible({ timeout: 30_000 })
+  await expect(page.locator('.eyebrow .premium')).toHaveText('Premium')
+})
+
+test('a free member sees no premium tab on what everyone gets', async ({ page }) => {
+  await signUpViaApi(page, uniqueEmail('recent-premium-free'))
+  await searchTarget(page, { wide: true })
+
+  await expect(page.locator('.hit-address').first()).toBeVisible()
+  await expect(page.locator('.premium')).toHaveCount(0)
 })

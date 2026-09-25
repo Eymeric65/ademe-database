@@ -125,6 +125,8 @@ describe('the aggregate it renders from', () => {
       'departement/ariege',
       'departement/haute-garonne',
       'presentation',
+      'cgv',
+      'mentions-legales',
       'departements',
     ])
     // Not a placeholder: the sample carries Ariège's own published numbers.
@@ -166,10 +168,12 @@ describe('the présentation page', () => {
     expect(xml).toContain(`<loc>${ORIGIN}/presentation</loc>`)
   })
 
-  it('links the stylesheet the built app itself loads, and ships no script', () => {
+  it('links the stylesheet the built app itself loads, and ships no bundle', () => {
     const html = readFileSync(join(out, 'presentation.html'), 'utf8')
     expect(html).toContain(`href="${CSS_HREF}"`)
-    expect(html).not.toContain('<script')
+    // The masthead’s account corner, and nothing else.
+    expect(html.match(/<script/g)).toHaveLength(1)
+    expect(html).toContain('<script>')
     expect(html).toContain(`<link rel="canonical" href="${ORIGIN}/presentation"/>`)
     // The hero, and a section from the body: the real component, not a stub.
     expect(html).toContain('Le diagnostic montre le logement')
@@ -184,5 +188,66 @@ describe('the présentation page', () => {
     writeFileSync(join(bare, 'index.html'), '<!doctype html><html><head></head><body></body></html>')
     expect(() => prerenderInto(bare, SAMPLE)).toThrow(/stylesheet/i)
     rmSync(bare, { recursive: true, force: true })
+  })
+})
+
+/**
+ * Selling a subscription to consumers in France requires terms of sale and a
+ * legal notice at addresses anybody can reach, Stripe's reviewers included --
+ * so they are prerendered pages, not hash routes.
+ */
+describe('the legal pages', () => {
+  const LEGAL = [
+    { page: 'cgv', heading: 'Conditions générales de vente' },
+    { page: 'mentions-legales', heading: 'Mentions légales' },
+  ]
+
+  it('are written, and listed in the sitemap', () => {
+    const xml = readFileSync(join(out, 'sitemap.xml'), 'utf8')
+    for (const { page } of LEGAL) {
+      expect(written.pages).toContain(page)
+      expect(existsSync(join(out, `${page}.html`))).toBe(true)
+      expect(xml).toContain(`<loc>${ORIGIN}/${page}</loc>`)
+    }
+  })
+
+  it('render under the masthead, with the app stylesheet and no bundle', () => {
+    for (const { page, heading } of LEGAL) {
+      const html = readFileSync(join(out, `${page}.html`), 'utf8')
+      expect(html).toContain('<header class="masthead">')
+      expect(html).toContain(`href="${CSS_HREF}"`)
+      expect(html).toContain(`<link rel="canonical" href="${ORIGIN}/${page}"/>`)
+      expect(html).toContain(`<h1>${heading}</h1>`)
+      expect(html.match(/<script/g)).toHaveLength(1)
+      expect(html).toContain('<script>')
+    }
+  })
+
+  it('say what is sold, for how much, and how it ends', () => {
+    const html = readFileSync(join(out, 'cgv.html'), 'utf8')
+    expect(html).toContain('5 € TTC par mois')
+    expect(html).toContain('Gérer mon abonnement')
+    expect(html).toContain('L221-28')
+  })
+
+  it('name the host and the processors of personal data', () => {
+    const html = readFileSync(join(out, 'mentions-legales.html'), 'utf8')
+    for (const name of ['Cloudflare', 'Stripe', 'Google', 'CNIL']) expect(html).toContain(name)
+  })
+
+  it('are linked from the foot of every other static page', () => {
+    for (const page of ['presentation', 'departements', 'departement/ariege']) {
+      const html = readFileSync(join(out, `${page}.html`), 'utf8')
+      expect(html, page).toContain('href="/cgv"')
+      expect(html, page).toContain('href="/mentions-legales"')
+    }
+  })
+
+  // The publisher's identity is the operator's to supply, not the code's to
+  // invent. Until it is filled in, this fails, and the pages cannot ship.
+  it('carry no placeholder left to fill in', () => {
+    for (const { page } of LEGAL) {
+      expect(readFileSync(join(out, `${page}.html`), 'utf8'), page).not.toContain('à compléter')
+    }
   })
 })

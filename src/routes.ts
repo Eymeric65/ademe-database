@@ -21,12 +21,14 @@ export type Route =
   | { name: 'search' }
   | { name: 'saved' }
   | { name: 'presentation' }
+  | { name: 'subscription' }
   | ({ name: 'detail' } & DetailRef)
 
 export function parse(hash: string): Route {
   const path = hash.replace(/^#/, '')
   if (path === '/saved') return { name: 'saved' }
   if (path === '/presentation') return { name: 'presentation' }
+  if (path === '/abonnement') return { name: 'subscription' }
   // The first links, and every row saved before ADR-0034: existing housing.
   const legacy = /^\/dpe\/([^/]+)$/.exec(path)
   if (legacy) {
@@ -47,6 +49,24 @@ export function parse(hash: string): Route {
 export function detailHref({ source, key, dept }: DetailRef): string {
   const k = encodeURIComponent(key)
   return dept ? `#/${source}/${encodeURIComponent(dept)}/${k}` : `#/${source}/${k}`
+}
+
+/** How a member came back from Stripe Checkout or its cancel page, if they just did. */
+export type CheckoutReturn = 'merci' | 'annule' | 'resilie' | null
+
+/**
+ * Read and clear the query Stripe Checkout sends a member back with.
+ *
+ * Stripe's return URLs (server/stripe.ts) are the one place this app is
+ * reached by query rather than by hash. They are answered by the Abonnement
+ * page, and the query is dropped from the address at once, so a reload does
+ * not replay "paiement reçu" and a copied link does not carry it.
+ */
+export function takeCheckoutReturn(): CheckoutReturn {
+  const value = new URLSearchParams(window.location.search).get('abonnement')
+  if (value !== 'merci' && value !== 'annule' && value !== 'resilie') return null
+  window.history.replaceState(null, '', '/#/abonnement')
+  return value
 }
 
 export function useRoute(): Route {

@@ -44,6 +44,20 @@
   --vermilion-soft: #f1d9ce;
   --vermilion-soft-dark: #38190f;
 
+  /* Gold leaf -- "kin", for what a paid plan opens. */
+  --gold-ink: #8a6a12;
+  --gold-ink-dark: #e0bc55;
+  --gold-soft: #f3e6bd;
+  --gold-soft-dark: #3a2f10;
+
+  /* Silver -- "gin", for the plan put forward before anyone has paid. */
+  --silver-face: #e4e4e0;
+  --silver-face-dark: #34363a;
+  --silver-sheen: #fbfbf8;
+  --silver-sheen-dark: #4a4d52;
+  --silver-edge: #a3a49f;
+  --silver-edge-dark: #7c8086;
+
   /* Type set ON an ink block: paper on a light-mode ink, sumi on a bright one. */
   --ink-contrast-light: #faf7f0;
   --ink-contrast-dark: #17140e;
@@ -85,6 +99,12 @@
   --ink-vermilion-soft: var(--vermilion-soft);
   --ink-contrast: var(--ink-contrast-light);
 
+  --ink-gold: var(--gold-ink);
+  --ink-gold-soft: var(--gold-soft);
+  --ink-silver: var(--silver-face);
+  --ink-silver-sheen: var(--silver-sheen);
+  --ink-silver-edge: var(--silver-edge);
+
   /* The offset a stamp casts. Mixed toward the fixed sumi primitive so it stays
      darker than whichever ink is on top of it, in both schemes. */
   --stamp: color-mix(in oklab, var(--color-accent) 45%, var(--neutral-900));
@@ -108,6 +128,12 @@
     --ink-vermilion: var(--vermilion-ink-dark);
     --ink-vermilion-soft: var(--vermilion-soft-dark);
     --ink-contrast: var(--ink-contrast-dark);
+
+    --ink-gold: var(--gold-ink-dark);
+    --ink-gold-soft: var(--gold-soft-dark);
+    --ink-silver: var(--silver-face-dark);
+    --ink-silver-sheen: var(--silver-sheen-dark);
+    --ink-silver-edge: var(--silver-edge-dark);
   }
 }
 
@@ -329,6 +355,15 @@ h2 {
   white-space: nowrap;
 }
 
+/* The same gold as the tab on what the plan opens. Not inside .who, which
+   phones hide. */
+.premium-star {
+  margin-left: -0.5rem;
+  color: var(--ink-gold);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
 /* --- the ink stamp ------------------------------------------------------- */
 
 /*
@@ -543,7 +578,10 @@ h1 {
     order: 3;
     width: 100%;
     margin-right: 0;
-    gap: 1rem;
+    gap: 0.5rem 1rem;
+    /* Five links do not fit 390 px on one line; unwrapped, the last ones
+       ran off the screen with nothing to scroll them back. */
+    flex-wrap: wrap;
   }
   /* The address bar is not the place for an email. "Se déconnecter" already
      says somebody is signed in, and dropping it is what keeps the header two
@@ -646,6 +684,7 @@ h1 {
  * than the row lifting: fifty rows that each lift is a page that shivers.
  */
 .hit {
+  position: relative;
   display: flex;
   gap: 1rem;
   padding: 0.9rem 0 0.9rem 0.85rem;
@@ -787,6 +826,278 @@ h1 {
 }
 
 /* --- the last two months, for paid members (ADR-0039) ------------------- */
+
+/* Gold, not an ink the page already uses: it marks what the plan opens, and
+   nothing else on the page may read as that. */
+.premium {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.05rem 0.4rem;
+  vertical-align: 0.15em;
+  border: 1px solid var(--ink-gold);
+  border-radius: var(--radius-tight);
+  background: var(--ink-gold-soft);
+  color: var(--ink-gold);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+/* The « Abonnement » page: a status line, then every plan side by side. The
+   member's own plan carries the same gold as the tab it opens, so the two
+   read as one thing; the others stay paper. */
+.subscription .lede + .lede {
+  margin-top: 0.5rem;
+}
+
+.plan-status {
+  margin-top: 1.25rem;
+  max-width: 44rem;
+}
+
+.plan-now {
+  margin: 0 0 0.75rem;
+  font-size: 1.15rem;
+}
+
+.plan-now strong {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.subscription .actions {
+  margin-top: 1.5rem;
+}
+
+.offer-terms {
+  margin: 1rem 0 0;
+  font-size: 0.875rem;
+}
+
+.subscription .error {
+  margin: 1rem 0 0;
+}
+
+.plans {
+  display: grid;
+  column-gap: 1.5rem;
+  margin-top: 2.5rem;
+  max-width: 48rem;
+}
+
+/* Each card spans the same rows of the outer grid -- head, price, one per
+   feature -- so a feature sits level in every card however tall the head. */
+.plan-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: subgrid;
+  row-gap: 0;
+  padding: 1.25rem 1.25rem 1.1rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-tight);
+  background: var(--color-surface);
+}
+
+/* Silver and wider: the paid plan is the one on show, whoever is looking. */
+.plan-card.featured {
+  border-color: var(--ink-silver-edge);
+  background: linear-gradient(
+    135deg,
+    var(--ink-silver) 0%,
+    var(--ink-silver-sheen) 45%,
+    var(--ink-silver) 60%,
+    color-mix(in oklab, var(--ink-silver) 85%, var(--ink-silver-edge)) 100%
+  );
+  box-shadow: 0 1px 0 var(--ink-silver-sheen) inset, 0 6px 18px -10px var(--ink-silver-edge);
+  isolation: isolate;
+}
+
+/* A slow glint crossing the silver. Out of flow, so the subgrid never sees it;
+   under the text (z-index -1 inside the isolated card), so it never washes it. */
+.plan-card.featured::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    115deg,
+    transparent 35%,
+    color-mix(in oklab, var(--ink-silver-sheen) 55%, transparent) 50%,
+    transparent 65%
+  ) no-repeat;
+  background-size: 250% 100%;
+  animation: plan-glint 6s ease-in-out infinite;
+}
+
+@keyframes plan-glint {
+  0%,
+  55% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -20% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plan-card.featured::after {
+    animation: none;
+    display: none;
+  }
+}
+
+.plan-card.featured h2 {
+  font-size: 1.7rem;
+}
+
+/* Gold: whichever plan is theirs, the eye lands there first. */
+.plan-card.current {
+  border-color: var(--ink-gold);
+  border-top-width: 4px;
+}
+
+.plan-card h2 {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.plan-card.current h2 {
+  font-size: 1.7rem;
+}
+
+.plan-price {
+  margin: 0.35rem 0 1rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
+}
+
+.plan-card.current .plan-price {
+  color: var(--ink-gold);
+}
+
+.plan-card ul {
+  display: grid;
+  grid-template-rows: subgrid;
+  row-gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.plan-card li {
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+}
+
+.plan-card li.excluded {
+  color: var(--color-muted);
+}
+
+.plan-mark {
+  flex: none;
+  width: 1rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--ink-gold);
+}
+
+.plan-card li.excluded .plan-mark {
+  color: var(--color-muted);
+}
+
+/* A tab hanging from the card's top rule, like the one on a paid row. */
+.plan-marker {
+  position: absolute;
+  top: -4px;
+  right: 1.25rem;
+  margin: 0;
+  padding: 0.15rem 0.5rem 0.2rem;
+  border-radius: 0 0 var(--radius-tight) var(--radius-tight);
+  background: var(--ink-gold);
+  color: var(--ink-contrast);
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.plan-tag {
+  display: inline-block;
+  margin: 0.4rem 0 0;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid var(--ink-gold);
+  border-radius: var(--radius-tight);
+  background: var(--ink-gold-soft);
+  color: var(--ink-gold);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+@media (max-width: 40rem) {
+  .plans {
+    grid-template-columns: 1fr !important;
+    row-gap: 1.5rem;
+  }
+}
+
+/* « Avant de partir »: one panel, cut like the offer. Its two buttons are the
+   same stamp on purpose -- neither may outweigh the other (ADR-0048). */
+.leaving-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in srgb, var(--color-bg) 70%, transparent);
+}
+
+.leaving {
+  max-width: 32rem;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border: 1px solid var(--ink-gold);
+  border-top-width: 4px;
+  border-radius: var(--radius-tight);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.leaving h2 {
+  margin: 0 0 1rem;
+  outline: none;
+}
+
+.leaving p {
+  margin: 0 0 0.75rem;
+}
+
+.leaving .actions {
+  margin: 1.5rem 0 0;
+}
+
+/* A tab hanging from the row's top rule, like an index card's. */
+.hit > .premium {
+  position: absolute;
+  top: -1px;
+  right: 0;
+  margin: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.hit:has(> .premium) .hit-body {
+  padding-right: 4.5rem;
+}
 
 /*
  * Placeholder rows under a blur, the count printed across them. Nothing under
@@ -1423,6 +1734,25 @@ a.signin {
 
 .pres-foot p {
   margin: 0 0 0.35rem;
+}
+
+/* The prerendered /cgv and /mentions-legales: plain reading, one measure. */
+.legal {
+  max-width: 42rem;
+}
+
+.legal h1 {
+  max-width: none;
+}
+
+.legal h2 {
+  margin: 2rem 0 0.5rem;
+  font-size: 1.15rem;
+}
+
+.legal p {
+  margin: 0 0 0.75rem;
+  line-height: 1.6;
 }
 
 /*

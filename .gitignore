@@ -27,3 +27,6 @@ __pycache__
 
 # ADEME_API_KEY lives here, never in the repo. See ADR-0013.
 .env
+
+# Private product notes: strategy, pricing, roadmap. Never published.
+resources

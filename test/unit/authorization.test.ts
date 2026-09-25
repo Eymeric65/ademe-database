@@ -25,8 +25,12 @@ const ROUTER = resolve(import.meta.dirname, '../../server/index.ts')
 /**
  * Reachable without a session. Sign-in cannot require being signed in, and the
  * DuckDB engine has to load before the app can tell anybody to sign in.
+ *
+ * Stripe's webhook carries no session. It is checked by signature instead, and
+ * it can only update subscription rows an owner's checkout already created --
+ * it never inserts one. See ADR-0047.
  */
-const PUBLIC = ['/api/health', '/api/auth/*', '/data/vendor/*']
+const PUBLIC = ['/api/health', '/api/auth/*', '/data/vendor/*', '/api/billing/webhook']
 
 /**
  * Needs a caller and reads data that has no owner -- the public certificates.
@@ -47,10 +51,14 @@ const PAID = ['/data/recent/*']
 const RECENT_PROBE = '/data/recent/x'
 
 /**
- * Reads the caller's own identity and nothing owned. Every addition here needs
- * a cross-tenant test in the same PR.
+ * Reads or acts on the caller's own identity and nothing owned. Every addition
+ * here needs a cross-tenant test in the same PR.
+ *
+ * Checkout opens a subscription for the caller alone: test/db/
+ * cross-tenant.test.ts proves A's payment never makes B paid. The portal opens
+ * on the caller's own customer only: the same file proves B never gets A's.
  */
-const SELF_SCOPED = ['/api/me']
+const SELF_SCOPED = ['/api/me', '/api/billing/checkout', '/api/billing/portal']
 
 export type Declared = { path: string; scope: string }
 

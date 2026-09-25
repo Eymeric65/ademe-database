@@ -11,11 +11,21 @@
  * `getSavedBuilding` and watching B read A's row; the output is in the PR body.
  */
 
-import { env, SELF } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { env, fetchMock, SELF } from 'cloudflare:test'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { migrate } from '../../db/migrate'
 import { ROUTES } from '../../server/index'
-import { setPlan, signUp, withCookie } from './helpers'
+import {
+  event,
+  postWebhook,
+  STRIPE_ORIGIN,
+  recentStatus,
+  setPlan,
+  signUp,
+  stubCheckout,
+  stubCompleted,
+  withCookie,
+} from './helpers'
 
 beforeEach(async () => {
   await migrate(env.DB)
@@ -176,7 +186,7 @@ describe('one paid account and one free', () => {
     await env.DATA.put('recent/v1/probe.bin', new Uint8Array(10))
     const a = await signUp('paid-a@example.test')
     const b = await signUp('free-b@example.test')
-    await setPlan('paid-a@example.test', 'paid')
+    await setPlan('paid-a@example.test', 'decouverte')
 
     // Every body read: an R2 stream left open fails isolated storage.
     const status = async (cookie: string) => {
@@ -187,5 +197,87 @@ describe('one paid account and one free', () => {
     expect(await status(b)).toBe(403)
     expect(await status(a)).toBe(200)
     expect(await status(b)).toBe(403)
+  })
+})
+
+describe('two users and one subscription', () => {
+  /**
+   * Checkout is a `self` route and the webhook is public, so the binding here
+   * is the subscription row's user_id, set by the owner's own checkout. See
+   * ADR-0047.
+   */
+  beforeEach(() => {
+    fetchMock.activate()
+    fetchMock.disableNetConnect()
+  })
+  afterEach(() => {
+    fetchMock.assertNoPendingInterceptors()
+    fetchMock.deactivate()
+  })
+
+  async function payingA(): Promise<{ a: string; b: string }> {
+    await env.DATA.put('recent/v1/probe.bin', new Uint8Array(10))
+    const a = await signUp('sub-a@example.test')
+    const b = await signUp('sub-b@example.test')
+    stubCheckout('cs_of_a')
+    const res = await SELF.fetch('http://x/api/billing/checkout', { method: 'POST', headers: { cookie: a } })
+    expect(res.status).toBe(200)
+    await res.arrayBuffer()
+    stubCompleted('cs_of_a', 'sub_of_a', { status: 'active', periodEnd: new Date(Date.now() + 20 * 86_400_000) })
+    expect((await postWebhook(event('checkout.session.completed', { id: 'cs_of_a' }))).status).toBe(204)
+    return { a, b }
+  }
+
+  it('makes A paid and never B', async () => {
+    const { a, b } = await payingA()
+    expect(await recentStatus(a)).toBe(200)
+    expect(await recentStatus(b)).toBe(403)
+  })
+
+  it('shows B nothing of A\'s in /api/me', async () => {
+    const { b } = await payingA()
+    const me = (await (await SELF.fetch('http://x/api/me', withCookie(b))).json()) as Record<string, unknown>
+    expect(me).toMatchObject({ plan: 'free', renewsOn: null, endsOn: null })
+  })
+
+  it('does not count A\'s subscription against B\'s checkout', async () => {
+    const { b } = await payingA()
+    stubCheckout('cs_of_b')
+    const res = await SELF.fetch('http://x/api/billing/checkout', { method: 'POST', headers: { cookie: b } })
+    expect(res.status).toBe(200)
+    await res.arrayBuffer()
+    const row = await env.DB.prepare(
+      'SELECT s.status, u.email FROM subscription s JOIN user u ON u.id = s.user_id WHERE s.id = ?',
+    )
+      .bind('cs_of_b')
+      .first()
+    expect(row).toEqual({ status: 'pending', email: 'sub-b@example.test' })
+  })
+
+  it('never opens a portal on A\'s customer for B, to manage or to cancel', async () => {
+    const { a, b } = await payingA()
+    // One portal session is on offer, and every form Stripe is asked with is kept.
+    const asked: string[] = []
+    fetchMock
+      .get(STRIPE_ORIGIN)
+      .intercept({ method: 'POST', path: '/v1/billing_portal/sessions' })
+      .reply(200, (opts) => {
+        asked.push(String(opts.body))
+        return JSON.stringify({ id: 'bps_a', url: 'https://billing.stripe.invalid/session/bps_a' })
+      })
+
+    for (const body of [{}, { cancel: true }]) {
+      const res = await post(b, '/api/billing/portal', body)
+      expect(res.status).toBe(404)
+      await res.arrayBuffer()
+    }
+    expect(asked.filter((form) => form.includes('cus_of_sub_of_a'))).toEqual([])
+
+    // The stub was live all along: A's own call is the one that reaches it.
+    const own = await post(a, '/api/billing/portal', {})
+    expect(own.status).toBe(200)
+    await own.arrayBuffer()
+    expect(asked).toHaveLength(1)
+    expect(new URLSearchParams(asked[0]).get('customer')).toBe('cus_of_sub_of_a')
   })
 })

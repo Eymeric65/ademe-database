@@ -107,11 +107,12 @@ describe('the département page', () => {
     expect(types).toContain('BreadcrumbList')
   })
 
-  it('ships zero JavaScript: the only script is the JSON-LD', () => {
+  it('ships no bundle: the JSON-LD and the masthead’s one inline script', () => {
     expect(html).not.toContain('<script src')
     const scripts = [...html.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1] ?? '')
-    expect(scripts.length).toBeGreaterThan(0)
-    for (const attrs of scripts) expect(attrs).toBe(' type="application/ld+json"')
+    expect(scripts.filter((attrs) => attrs === '')).toHaveLength(1)
+    for (const attrs of scripts.filter((a) => a !== '')) expect(attrs).toBe(' type="application/ld+json"')
+    expect(scripts.length).toBeGreaterThan(1)
   })
 
   it('names the arrondissement rather than repeating the city twenty times', () => {
@@ -202,9 +203,10 @@ describe('the index of départements', () => {
     expect(total).toContain('15,8\u00a0%')
   })
 
-  it('ships zero JavaScript: the only script is the JSON-LD', () => {
+  it('ships no bundle: the JSON-LD and the masthead’s one inline script', () => {
     const scripts = [...index.matchAll(/<script\b([^>]*)>/g)].map((m) => m[1] ?? '')
-    for (const attrs of scripts) expect(attrs).toBe(' type="application/ld+json"')
+    expect(scripts.filter((attrs) => attrs === '')).toHaveLength(1)
+    for (const attrs of scripts.filter((a) => a !== '')) expect(attrs).toBe(' type="application/ld+json"')
   })
 })
 

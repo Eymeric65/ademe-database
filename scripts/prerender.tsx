@@ -22,6 +22,7 @@ import {
   ORIGIN,
   renderDepartementPage,
   renderDepartementsIndex,
+  renderLegalPage,
   renderPresentationPage,
 } from '../src/seo/page'
 
@@ -137,6 +138,13 @@ export function prerenderInto(outDir: string, from = aggregatesPath()): { pages:
   // The Présentation, at an address a crawler can reach.
   writeFileSync(`${root}presentation.html`, renderPresentationPage({ stylesheet }))
   pages.push('presentation')
+
+  // The terms of sale and the legal notice: selling the paid plan needs both
+  // at addresses anybody can read. See src/legal/Legal.tsx.
+  for (const page of ['cgv', 'mentions-legales'] as const) {
+    writeFileSync(`${root}${page}.html`, renderLegalPage({ page, stylesheet }))
+    pages.push(page)
+  }
 
   // The one page that links every département page: the « Statistiques » tab.
   writeFileSync(
