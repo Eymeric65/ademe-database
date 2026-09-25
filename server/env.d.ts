@@ -31,8 +31,8 @@ interface Env {
   /**
    * Stripe, for the paid plan. The key and the webhook secret are secrets
    * (`wrangler secret put`, test-mode values under --env preview); the price is
-   * a var. Any of them missing and the billing routes answer 503: no key, no
-   * checkout. See ADR-0047.
+   * a secret in production and a var on previews. Any of them missing and the
+   * billing routes answer 503: no key, no checkout. See ADR-0047 and ADR-0050.
    */
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
