@@ -1298,13 +1298,15 @@ h1 {
 /* --- detail -------------------------------------------------------------- */
 
 .hit-address a,
-.group a {
+.group a,
+.app-foot a {
   color: inherit;
   text-decoration-color: var(--color-border);
   text-underline-offset: 3px;
 }
 
-.hit-address a:hover {
+.hit-address a:hover,
+.app-foot a:hover {
   text-decoration-color: var(--color-accent);
 }
 
