@@ -278,6 +278,11 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* Never waits on /api/me: the legal links hold for everybody. */}
+      <footer className="app-foot">
+        <a href="/cgv">Conditions générales de vente</a> · <a href="/mentions-legales">Mentions légales</a>
+      </footer>
     </>
   )
 }

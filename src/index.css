@@ -592,6 +592,10 @@ h1 {
   main {
     padding: 2rem 1rem 4rem;
   }
+
+  .app-foot {
+    padding-inline: 1rem;
+  }
 }
 
 /* --- search -------------------------------------------------------------- */
@@ -1720,10 +1724,17 @@ a.signin {
   max-width: 24ch;
 }
 
-/*
- * Only the prerendered /presentation carries this: in the app the masthead and
- * the gate are the frame, and there is no footer. See src/seo/page.tsx.
- */
+/* The app's own foot, under every screen: the CGV and the legal notice. */
+.app-foot {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 2rem;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-muted);
+  font-size: 0.875rem;
+}
+
+/* The prerendered /presentation's own foot. See src/seo/page.tsx. */
 .pres-foot {
   margin-top: 3rem;
   padding-top: 1.25rem;

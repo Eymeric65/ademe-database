@@ -136,7 +136,6 @@ export function Subscription({
   // below never change with the state; this is the only part that does.
   let lines: ReactNode = null
   let buttons: ReactNode = null
-  let terms = false
   if (cancelling) {
     lines = (
       <p className="lede" role="status">
@@ -187,7 +186,6 @@ export function Subscription({
       </>
     )
     buttons = offer
-    terms = true
   }
 
   return (
@@ -206,11 +204,10 @@ export function Subscription({
         {lines}
         {buttons ? <p className="actions">{buttons}</p> : null}
         {error ? <p className="error">{error}</p> : null}
-        {terms ? (
-          <p className="offer-terms">
-            <a href="/cgv">Conditions générales de vente</a>
-          </p>
-        ) : null}
+        {/* Whatever the state: the terms bind whoever has bought, not only whoever is about to. */}
+        <p className="offer-terms">
+          <a href="/cgv">Conditions générales de vente</a>
+        </p>
       </div>
 
       <div
