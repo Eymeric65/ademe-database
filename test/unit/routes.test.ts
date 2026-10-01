@@ -30,8 +30,8 @@ describe('the hash routes', () => {
     }
   })
 
-  it('has a presentation page of its own', () => {
-    expect(parse('#/presentation')).toEqual({ name: 'presentation' })
+  it('has no presentation route: the page lives at /presentation', () => {
+    expect(parse('#/presentation')).toEqual({ name: 'search' })
   })
 
   it('does not take an unknown source for a certificate', () => {

@@ -104,11 +104,14 @@ test('a stranger reads the presentation under the sign-in prompt', async ({ page
 test('the presentation is the first entry of the menu, and a page of its own', async ({ page }) => {
   await page.goto('/')
 
+  // The prerendered /presentation, not a hash route: one address for the copy,
+  // the one a crawler can read.
   const menu = page.getByRole('navigation', { name: 'Principal' }).getByRole('link')
   await expect(menu.first()).toHaveText('Présentation')
+  await expect(menu.first()).toHaveAttribute('href', '/presentation')
   await menu.first().click()
 
-  await expect(page).toHaveURL(/#\/presentation$/)
+  await expect(page).toHaveURL(/^[^#]*\/presentation$/)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(
     'L’annonce montre une lettre. Le diagnostic montre le logement.',
   )
@@ -116,6 +119,15 @@ test('the presentation is the first entry of the menu, and a page of its own', a
   await expect(
     page.getByRole('heading', { name: 'Retrouvez un logement à partir de son DPE' }),
   ).toHaveCount(0)
+})
+
+test('an old #/presentation link lands on /presentation', async ({ page }) => {
+  await page.goto('/#/presentation')
+
+  await expect(page).toHaveURL(/^[^#]*\/presentation$/)
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+    'L’annonce montre une lettre. Le diagnostic montre le logement.',
+  )
 })
 
 test('Statistiques leads out of the app to the index of départements', async ({ page }) => {

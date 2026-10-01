@@ -2,7 +2,8 @@
  * What the product is, for somebody who has not signed in yet -- or who has
  * and wants to send the link to somebody else.
  *
- * Two mounts: a page of its own at #/presentation, and the same sections
+ * Two mounts: a page of its own at /presentation (prerendered by
+ * src/seo/page.tsx), and the same sections
  * under the gate on the signed-out landing page, where the gate is already
  * the hero. TRAP: under the gate no heading here may contain "DPE" and no
  * button may reuse a gate or masthead label, or a strict e2e selector
