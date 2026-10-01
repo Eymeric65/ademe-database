@@ -20,14 +20,12 @@ export type DetailRef = { source: SourceId; key: string; dept: string | null }
 export type Route =
   | { name: 'search' }
   | { name: 'saved' }
-  | { name: 'presentation' }
   | { name: 'subscription' }
   | ({ name: 'detail' } & DetailRef)
 
 export function parse(hash: string): Route {
   const path = hash.replace(/^#/, '')
   if (path === '/saved') return { name: 'saved' }
-  if (path === '/presentation') return { name: 'presentation' }
   if (path === '/abonnement') return { name: 'subscription' }
   // The first links, and every row saved before ADR-0034: existing housing.
   const legacy = /^\/dpe\/([^/]+)$/.exec(path)
@@ -69,10 +67,19 @@ export function takeCheckoutReturn(): CheckoutReturn {
   return value
 }
 
+/**
+ * The current route. The présentation is a prerendered page at /presentation
+ * now, not a hash route, so an old #/presentation link is sent there.
+ */
+function current(): Route {
+  if (window.location.hash === '#/presentation') window.location.replace('/presentation')
+  return parse(window.location.hash)
+}
+
 export function useRoute(): Route {
-  const [route, setRoute] = useState<Route>(() => parse(window.location.hash))
+  const [route, setRoute] = useState<Route>(current)
   useEffect(() => {
-    const onChange = () => setRoute(parse(window.location.hash))
+    const onChange = () => setRoute(current())
     window.addEventListener('hashchange', onChange)
     return () => window.removeEventListener('hashchange', onChange)
   }, [])

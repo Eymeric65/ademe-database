@@ -171,13 +171,8 @@ export default function App() {
         </a>
 
         <nav className="nav" aria-label="Principal">
-          <a
-            href="#/presentation"
-            aria-current={route.name === 'presentation' ? 'page' : undefined}
-          >
-            Présentation
-          </a>
-          {/* A real path, not a hash route: the index is a prerendered page. */}
+          {/* Real paths, not hash routes: both are prerendered pages. */}
+          <a href="/presentation">Présentation</a>
           <a href="/departements">Statistiques</a>
           <a href="#/" aria-current={route.name === 'search' ? 'page' : undefined}>
             Rechercher
@@ -232,13 +227,7 @@ export default function App() {
             <Search paid={account.plan !== 'free'} />
           </div>
         ) : null}
-        {loading ? null : route.name === 'presentation' ? (
-          <Presentation
-            hero
-            signedIn={Boolean(account)}
-            onSignIn={() => void signInWithGoogle()}
-          />
-        ) : route.name === 'subscription' ? (
+        {loading ? null : route.name === 'subscription' ? (
           <Subscription
             account={account ?? null}
             returned={RETURNED}
