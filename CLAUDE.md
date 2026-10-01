@@ -70,7 +70,7 @@ uv run pytest -m "not live"
 reaches a database as **nothing at all** — no error, no missing column until the first query needs
 it.
 
-## 5. Deploy a preview and hand over the link before opening the PR
+## 5. Deploy a preview, then open the PR with its link
 
 ```bash
 npm run preview        # wrangler versions upload; prints the preview URL
@@ -80,9 +80,9 @@ npm run preview        # wrangler versions upload; prints the preview URL
 `<version-prefix>-<worker>.<subdomain>.workers.dev`. Previews bind the separate
 `ademe-app-preview` D1, so a preview can never write to real user data.
 
-**Give Eymeric the URL and let him try it before the PR exists.** Then open the PR with that URL in
-the body, next to the red-then-green test output. A PR that arrives without a preview link is
-incomplete.
+**Give Eymeric the URL, then open the PR straight away** with that URL in the body, next to the
+red-then-green test output. Do not wait for him to try the preview first: he reviews it on the PR.
+A PR that arrives without a preview link is incomplete.
 
 ## 6. Open the PR yourself, always to `dev`
 
