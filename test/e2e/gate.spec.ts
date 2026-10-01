@@ -151,3 +151,19 @@ test('signed in, the landing page is still the search', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Présentation' })).toBeVisible()
   await expect(page.getByRole('heading', { name: GAPS })).toHaveCount(0)
 })
+
+/**
+ * The terms of sale and the legal notice, one click from every screen of the
+ * app, signed in or not -- the prerendered pages already carry them.
+ */
+for (const signedIn of [false, true]) {
+  test(`every screen has the legal links in its footer, ${signedIn ? 'signed in' : 'signed out'}`, async ({ page }) => {
+    if (signedIn) await signUpViaApi(page, uniqueEmail('footer'))
+    for (const path of ['/', '/#/saved', '/#/abonnement', '/#/existant/2107E0132696Z']) {
+      await page.goto(path)
+      const foot = page.getByRole('contentinfo')
+      await expect(foot.getByRole('link', { name: 'Conditions générales de vente' }), path).toHaveAttribute('href', '/cgv')
+      await expect(foot.getByRole('link', { name: 'Mentions légales' }), path).toHaveAttribute('href', '/mentions-legales')
+    }
+  })
+}

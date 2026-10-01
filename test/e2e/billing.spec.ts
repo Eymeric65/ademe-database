@@ -104,7 +104,41 @@ test('a free member is offered the plan, and the button opens Stripe Checkout', 
 test('the offer links the CGV the checkout asks to accept', async ({ page }) => {
   await page.goto('/#/abonnement')
   await expect(page.getByRole('article', { name: 'Découverte' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Conditions générales de vente' })).toHaveAttribute('href', '/cgv')
+  await expect(
+    page.locator('.subscription').getByRole('link', { name: 'Conditions générales de vente' }),
+  ).toHaveAttribute('href', '/cgv')
+})
+
+/**
+ * The terms bind whoever has bought, not only whoever is about to: the link
+ * used to vanish from this page as soon as the plan was anything but free.
+ */
+for (const [state, give] of [
+  ['a subscriber', (email: string) => subscribe(email, { days: 30 })],
+  ['a subscriber cancelled at period end', (email: string) => subscribe(email, { days: 12, cancelAtPeriodEnd: true })],
+  ['a renewal that failed', (email: string) => subscribe(email, { status: 'past_due', days: 25 })],
+] as const) {
+  test(`${state} still finds the CGV on the Abonnement page`, async ({ page }) => {
+    const email = uniqueEmail('billing-cgv')
+    await signUpViaApi(page, email)
+    give(email)
+    await page.goto('/#/abonnement')
+    await expect(page.getByRole('article', { name: 'Découverte' })).toBeVisible()
+    await expect(
+      page.locator('.subscription').getByRole('link', { name: 'Conditions générales de vente' }),
+    ).toHaveAttribute('href', '/cgv')
+  })
+}
+
+test('an account given the plan by hand still finds the CGV on the Abonnement page', async ({ page }) => {
+  const email = uniqueEmail('billing-cgv-comped')
+  await signUpViaApi(page, email)
+  await makePaid(page, email)
+  await page.goto('/#/abonnement')
+  await expect(page.getByText('Vous êtes actuellement sur le plan Découverte.')).toBeVisible()
+  await expect(
+    page.locator('.subscription').getByRole('link', { name: 'Conditions générales de vente' }),
+  ).toHaveAttribute('href', '/cgv')
 })
 
 test('somebody signed out is asked to sign in first', async ({ page }) => {

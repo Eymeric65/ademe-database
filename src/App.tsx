@@ -267,6 +267,14 @@ export default function App() {
           </>
         )}
       </main>
+
+      {/* After /api/me, like <main>: drawn before it, the foot sits right
+          under the masthead and jumps down once the page fills in. */}
+      {loading ? null : (
+        <footer className="app-foot">
+          <a href="/cgv">Conditions générales de vente</a> · <a href="/mentions-legales">Mentions légales</a>
+        </footer>
+      )}
     </>
   )
 }
